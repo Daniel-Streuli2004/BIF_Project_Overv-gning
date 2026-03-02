@@ -58,6 +58,16 @@ class SimulationConfig:
     # If None, the simulator uses the current wall-clock time.
     start_time: datetime | None = None
     seed: int | None = None
+    total_people: int = 50
+    tick_interval_s: float = 1.0
+    entry_proximity_m: float = 8.0
+    exit_reached_m: float = 8.0
+    true_allow_probability: float = 0.80
+    camera_confidence_threshold: float = 0.70
+    false_positive_rate: float = 0.05
+    false_negative_rate: float = 0.10
+    center_lat: float = 55.6479
+    center_lon: float = 12.0417
     locations: tuple[SimulationLocationConfig, ...] = ()
 
 
@@ -307,6 +317,34 @@ def _parse_simulation_config(raw: Any) -> SimulationConfig | None:
     seed_raw = raw.get("seed")
     seed = int(seed_raw) if seed_raw is not None else None
 
+    total_people_raw = raw.get("total_people")
+    total_people = int(total_people_raw) if total_people_raw is not None else 50
+
+    timing_raw = raw.get("timing") if isinstance(raw.get("timing"), dict) else {}
+    tick_interval_raw = timing_raw.get("tick_interval_s")
+    tick_interval_s = float(tick_interval_raw) if tick_interval_raw is not None else 1.0
+
+    decision_raw = raw.get("decision") if isinstance(raw.get("decision"), dict) else {}
+    entry_proximity_raw = decision_raw.get("entry_proximity_m")
+    entry_proximity_m = float(entry_proximity_raw) if entry_proximity_raw is not None else 8.0
+    true_allow_raw = decision_raw.get("true_allow_probability")
+    true_allow_probability = float(true_allow_raw) if true_allow_raw is not None else 0.80
+    confidence_raw = decision_raw.get("camera_confidence_threshold")
+    camera_confidence_threshold = float(confidence_raw) if confidence_raw is not None else 0.70
+    false_positive_raw = decision_raw.get("false_positive_rate")
+    false_positive_rate = float(false_positive_raw) if false_positive_raw is not None else 0.05
+    false_negative_raw = decision_raw.get("false_negative_rate")
+    false_negative_rate = float(false_negative_raw) if false_negative_raw is not None else 0.10
+
+    exit_reached_raw = raw.get("exit_reached_m")
+    exit_reached_m = float(exit_reached_raw) if exit_reached_raw is not None else entry_proximity_m
+
+    stadium_raw = raw.get("stadium") if isinstance(raw.get("stadium"), dict) else {}
+    center_lat_raw = stadium_raw.get("center_lat")
+    center_lon_raw = stadium_raw.get("center_lon")
+    center_lat = float(center_lat_raw) if center_lat_raw is not None else 55.6479
+    center_lon = float(center_lon_raw) if center_lon_raw is not None else 12.0417
+
     locations_raw = raw.get("locations") or []
     if not isinstance(locations_raw, list):
         raise ValueError("Config key 'simulation.locations' must be a list")
@@ -336,6 +374,16 @@ def _parse_simulation_config(raw: Any) -> SimulationConfig | None:
         step_delay_s=step_delay_s,
         start_time=start_time,
         seed=seed,
+        total_people=total_people,
+        tick_interval_s=tick_interval_s,
+        entry_proximity_m=entry_proximity_m,
+        exit_reached_m=exit_reached_m,
+        true_allow_probability=true_allow_probability,
+        camera_confidence_threshold=camera_confidence_threshold,
+        false_positive_rate=false_positive_rate,
+        false_negative_rate=false_negative_rate,
+        center_lat=center_lat,
+        center_lon=center_lon,
         locations=tuple(locations),
     )
 

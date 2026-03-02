@@ -24,6 +24,45 @@ In this phase, you focus only on local simulation behavior:
 
 Do not add MQTT publish/subscribe in Phase 1. Keep the notebook local and easy to understand.
 
+## Phase 2 Exercise: Add Configuration Parameters
+
+Update `config.yaml` so your simulation and MQTT settings come from configuration, not hardcoded values.
+
+In this phase, you focus on configuration only:
+- Add/confirm MQTT profile settings and base topic.
+- Add simulation parameters for stadium geometry, timing, routing, and decision thresholds.
+- Keep secrets out of `config.yaml` by using `username_env` and `password_env` keys.
+- Confirm notebooks can load values with `simulated_city.config.load_config()`.
+
+Do not implement MQTT publish/subscribe in this phase.
+
+## Phase 3 Exercise: Add MQTT Publishing (People Agent)
+
+Update `notebooks/agent_people.ipynb` to publish simulation data to MQTT.
+
+In this phase, you focus on publishing only:
+- Connect to broker using `mqtt.connect_mqtt(mqtt_cfg)`.
+- Publish with `mqtt.publish_json_checked(...)`.
+- Publish person state to `simulated-city/stadium/person/state`.
+- Publish entry events to `simulated-city/stadium/entry/event`.
+- Use QoS `0` and no retained messages.
+
+Do not add subscriber logic or a second communicating agent in this phase.
+
+## Phase 4 Exercise: Add Camera Agent (Subscribe + Publish)
+
+Create `notebooks/agent_camera.ipynb` as the second communicating agent.
+
+In this phase, you focus on camera logic:
+- Subscribe to `simulated-city/stadium/person/state`.
+- Evaluate allow/deny decisions with a random model.
+- Keep allowed outcomes more frequent than denied outcomes.
+- Include false positives and false negatives from config values.
+- Publish decisions to `simulated-city/stadium/camera/decision`.
+- Use fixed reason-code taxonomy from the concepts document.
+
+Do not add dashboard visualization in this phase.
+
 ## Example Structure
 
 ```

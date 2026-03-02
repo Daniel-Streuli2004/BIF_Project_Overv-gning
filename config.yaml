@@ -53,7 +53,115 @@ mqtt:
   keepalive_s: 60
 
   # Topic defaults (projects can change these)
-  base_topic: "simulated-city"
+  base_topic: "simulated-city/stadium"
+
+simulation:
+  # Core simulation defaults
+  seed: 42
+  total_people: 50
+
+  # Stadium map definition
+  stadium:
+    center_lat: 55.6479
+    center_lon: 12.0417
+    boundary_radius_m: 220
+
+    # Entry points (used in Phase 1 notebook via simulation.locations fallback-compatible mapping)
+    entries:
+      - entry_id: E1
+        lat: 55.6493
+        lon: 12.0408
+      - entry_id: E2
+        lat: 55.6491
+        lon: 12.0428
+      - entry_id: E3
+        lat: 55.6467
+        lon: 12.0427
+      - entry_id: E4
+        lat: 55.6466
+        lon: 12.0406
+
+    # Gate crossing geometry for "inside stadium" decisions
+    entry_gate_lines:
+      - entry_id: E1
+        lat1: 55.64935
+        lon1: 12.04070
+        lat2: 55.64922
+        lon2: 12.04095
+      - entry_id: E2
+        lat1: 55.64915
+        lon1: 12.04265
+        lat2: 55.64900
+        lon2: 12.04292
+      - entry_id: E3
+        lat1: 55.64675
+        lon1: 12.04255
+        lat2: 55.64660
+        lon2: 12.04282
+      - entry_id: E4
+        lat1: 55.64672
+        lon1: 12.04045
+        lat2: 55.64652
+        lon2: 12.04072
+    gate_crossing_tolerance_m: 1.5
+
+    # Exit targets for denied people
+    exit_waypoints:
+      - waypoint_id: X1
+        lat: 55.6509
+        lon: 12.0388
+      - waypoint_id: X2
+        lat: 55.6509
+        lon: 12.0446
+      - waypoint_id: X3
+        lat: 55.6448
+        lon: 12.0446
+      - waypoint_id: X4
+        lat: 55.6448
+        lon: 12.0388
+
+  # Backward-compatible location list for existing SimulationConfig parser and Phase 1 notebook
+  locations:
+    - id: E1
+      lat: 55.6493
+      lon: 12.0408
+    - id: E2
+      lat: 55.6491
+      lon: 12.0428
+    - id: E3
+      lat: 55.6467
+      lon: 12.0427
+    - id: E4
+      lat: 55.6466
+      lon: 12.0406
+
+  # Movement and routing
+  motion:
+    min_speed_mps: 0.8
+    max_speed_mps: 1.8
+    step_noise_m: 0.5
+  routing:
+    tie_break_rule: lowest_entry_id
+    retarget_interval_s: 5.0
+    lock_on_at_distance_m: 12.0
+
+  # Decision model (camera + allowed status)
+  decision:
+    true_allow_probability: 0.80
+    camera_confidence_threshold: 0.70
+    entry_proximity_m: 8
+    out_of_bounds_margin_m: 15
+    false_positive_rate: 0.05
+    false_negative_rate: 0.10
+
+  # Timing controls
+  timing:
+    tick_interval_s: 1.0
+    person_state_publish_interval_s: 1.0
+    occupancy_publish_interval_s: 2.0
+    command_timeout_s: 5.0
+    command_retry_interval_s: 2.0
+    heartbeat_interval_s: 10.0
 
 # EXAMPLE: To use multiple MQTT brokers simultaneously, uncomment and edit above.
 # Replace the single "profile: local" line with:

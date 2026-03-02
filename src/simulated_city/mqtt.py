@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import socket
 import ssl
@@ -96,3 +97,40 @@ def _make_client_id(prefix: str, suffix: str | None) -> str:
     if suffix:
         return f"{safe_prefix}-{suffix}"
     return safe_prefix
+
+
+def connect_mqtt(cfg: MqttConfig, *, client_id_suffix: str | None = None):
+    """Connect to MQTT and return a ready-to-use paho client.
+
+    This is a notebook-friendly convenience wrapper around `MqttConnector`.
+    """
+
+    connector = MqttConnector(cfg, client_id_suffix=client_id_suffix)
+    connector.connect()
+    if not connector.wait_for_connection(timeout=10.0):
+        raise RuntimeError(f"Failed to connect to MQTT broker at {cfg.host}:{cfg.port}")
+    return connector.client
+
+
+def publish_json_checked(
+    client,
+    topic: str,
+    data,
+    *,
+    qos: int = 0,
+    retain: bool = False,
+    timeout_s: float = 2.0,
+) -> bool:
+    """Publish JSON payload and return True when publish reports success.
+
+    Accepts dict/list payloads and serializes them to JSON.
+    """
+
+    if isinstance(data, (dict, list)):
+        payload = json.dumps(data, ensure_ascii=False)
+    else:
+        payload = str(data)
+
+    info = client.publish(topic, payload=payload, qos=qos, retain=retain)
+    info.wait_for_publish(timeout=timeout_s)
+    return info.rc == 0

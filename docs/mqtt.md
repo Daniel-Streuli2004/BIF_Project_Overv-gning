@@ -2,6 +2,90 @@
 
 This template includes **paho-mqtt** by default and ships with a committed `config.yaml` that supports **multiple MQTT brokers simultaneously**.
 
+## Phase 3: People Agent Publishing
+
+Phase 3 adds MQTT publishing from `notebooks/agent_people.ipynb`.
+
+The notebook now:
+- loads broker settings from `config.yaml` through `load_config()`
+- connects with `mqtt.connect_mqtt(mqtt_cfg)`
+- publishes with `mqtt.publish_json_checked(...)`
+- uses QoS `0` and no retained messages
+
+### Topics used in Phase 3
+
+- `simulated-city/stadium/person/state`
+  - publisher: `agent_people`
+  - payload fields:
+    - `person_id`
+    - `name`
+    - `timestamp`
+    - `lat`
+    - `lon`
+    - `state`
+    - `color`
+    - `speed_mps`
+    - `target_entry_id`
+
+- `simulated-city/stadium/entry/event`
+  - publisher: `agent_people`
+  - payload fields:
+    - `person_id`
+    - `timestamp`
+    - `event_type` (`entered|denied|exited`)
+    - `entry_id`
+
+### Convenience helpers
+
+The module provides notebook-friendly wrappers:
+
+- `connect_mqtt(cfg, client_id_suffix=None)`
+  - connects and waits for broker connection
+  - returns a ready-to-use paho client
+
+- `publish_json_checked(client, topic, data, qos=0, retain=False)`
+  - accepts dict/list or string data
+  - publishes JSON payload
+  - waits for publish acknowledgement and returns success boolean
+
+## Phase 4: Camera Agent Subscription + Decision Publishing
+
+Phase 4 adds a second notebook agent: `notebooks/agent_camera.ipynb`.
+
+The camera agent:
+- subscribes to `simulated-city/stadium/person/state`
+- evaluates each person once while in `approaching_entry`
+- applies a random decision model with:
+  - more allowed than denied outcomes
+  - false positives and false negatives from config
+- publishes decisions to `simulated-city/stadium/camera/decision`
+
+### Topic flow in Phase 4
+
+- Input topic (subscribed by camera):
+  - `simulated-city/stadium/person/state`
+
+- Output topic (published by camera):
+  - `simulated-city/stadium/camera/decision`
+
+### Decision payload schema
+
+- `person_id` (string)
+- `timestamp` (ISO string)
+- `allowed` (boolean)
+- `reason_code` (string)
+- `confidence` (number)
+- `entry_id` (string)
+
+### Reason code taxonomy used
+
+- `allowed_lucky`
+- `allowed_clear`
+- `denied_unlucky`
+- `denied_flagged`
+- `camera_false_positive`
+- `camera_false_negative`
+
 This document covers everything in `simulated_city.mqtt`:
 
 - `MqttConnector`
