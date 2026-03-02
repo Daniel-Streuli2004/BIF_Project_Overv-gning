@@ -1,84 +1,189 @@
 # Clarified Design (Pre-Code)
 
-## 1) Four Components (Technical Rewrite)
+## 1. System Overview
 
-- Trigger (Movement Generator): Simulate 50 person agents around Brøndby Stadium with fixed initial cohorts: 20 in searching_entry, 25 in entering, 5 in blocked_exiting. Each person has an ID, display name, position, velocity/step behavior, and status color (yellow/green/red).
-- Observer (Perception Layer): A camera-sensor agent ingests person position/state updates and determines whether a person is authorized to enter. It produces a normalized decision (allowed true/false + reason code) rather than raw color-only logic.
-- Control Center (Decision Layer): A control agent consumes sensor decisions and current movement state, then publishes movement directives: continue searching, proceed to gate/inside, or move away from stadium perimeter.
-- Response (Actuation + Outcome): Person agents apply directives and update trajectory/state. A dashboard agent visualizes live positions and stadium occupancy, including an inside_count counter updated when entry events are confirmed.
+### Trigger (Movement Generator)
+- Simulate 50 person agents moving around Brøndby Stadium.
+- All persons start with neutral status and white color.
+- Each person is assigned a movement target from a list of stadium entrances.
+- Persons remain white while approaching entrances and only change status at entry attempt.
 
-## 2) MQTT Topic Design (Agent Pub/Sub)
+### Observer (Perception Layer)
+- A camera-sensor agent observes persons when they reach an entry zone.
+- The observer evaluates each entry attempt and produces a normalized decision.
+- Decision output contains an `allowed` boolean and a `reason_code`.
 
-### stadium/person/state
-- Publishes: agent_people
-- Subscribes: agent_camera, agent_control, dashboard
-- Payload: person ID, timestamp, lat/lon, current state, color, speed, heading
+### Control Center (Decision Layer)
+- A control agent consumes camera decisions and current person states.
+- The control agent publishes movement directives per person:
+	- continue toward entry
+	- enter stadium
+	- move away from stadium
 
-### stadium/camera/decision
-- Publishes: agent_camera
-- Subscribes: agent_control, dashboard
-- Payload: person ID, allowed flag, reason code, confidence, timestamp
+### Response (Actuation + Outcome)
+- Person agents apply directives and update position/state on each simulation tick.
+- If a person is allowed, color changes to green and state changes to inside.
+- If a person is denied, color changes to red and state changes to exiting.
+- A dashboard displays live person locations, colors, and stadium occupancy.
+- Occupancy is updated when entry events are confirmed.
 
-### stadium/control/command
-- Publishes: agent_control
-- Subscribes: agent_people, dashboard
-- Payload: person ID, command (search|enter|exit), target waypoint ID, effective timestamp
+## 2. MQTT Architecture
 
-### stadium/entry/event
-- Publishes: agent_people (on gate crossing)
-- Subscribes: agent_control, dashboard
-- Payload: person ID, event type (entered|denied|exited), gate ID, timestamp
+Base namespace: `simulated-city/stadium`
 
-### stadium/occupancy/state
-- Publishes: agent_control (or dedicated occupancy agent)
-- Subscribes: dashboard
-- Payload: inside count, denied count, searching count, entering count, blocked count, timestamp
+### Topic: `simulated-city/stadium/person/state`
+- **Publishes:** `agent_people`
+- **Subscribes:** `agent_camera`, `agent_control`, `dashboard`
+- **Message schema (JSON):**
+	- `person_id` (string)
+	- `name` (string)
+	- `timestamp` (string, ISO 8601)
+	- `lat` (number)
+	- `lon` (number)
+	- `state` (string: `approaching_entry|inside|exiting`)
+	- `color` (string: `white|green|red`)
+	- `speed_mps` (number)
+	- `target_entry_id` (string)
 
-### stadium/system/heartbeat
-- Publishes: all agents
-- Subscribes: dashboard/ops monitor
-- Payload: agent name, status, last processed tick, timestamp
+### Topic: `simulated-city/stadium/camera/decision`
+- **Publishes:** `agent_camera`
+- **Subscribes:** `agent_control`, `dashboard`
+- **Message schema (JSON):**
+	- `person_id` (string)
+	- `timestamp` (string, ISO 8601)
+	- `allowed` (boolean)
+	- `reason_code` (string)
+	- `confidence` (number, 0.0-1.0)
+	- `entry_id` (string)
 
-## 3) Configuration Parameters (What should be in config)
+### Topic: `simulated-city/stadium/control/command`
+- **Publishes:** `agent_control`
+- **Subscribes:** `agent_people`, `dashboard`
+- **Message schema (JSON):**
+	- `person_id` (string)
+	- `timestamp` (string, ISO 8601)
+	- `command` (string: `continue|enter|exit`)
+	- `target_waypoint_id` (string)
+	- `command_ttl_s` (number)
 
-### MQTT broker
-- host, port, username env key, password env key, keepalive, TLS enabled, client ID prefix, base topic
+### Topic: `simulated-city/stadium/entry/event`
+- **Publishes:** `agent_people`
+- **Subscribes:** `agent_control`, `dashboard`
+- **Message schema (JSON):**
+	- `person_id` (string)
+	- `timestamp` (string, ISO 8601)
+	- `event_type` (string: `entered|denied|exited`)
+	- `entry_id` (string)
 
-### Locations
-- stadium center lat/lon
-- stadium boundary radius/polygon
-- entry gate coordinates (list)
-- exit corridor/away-point coordinates
+### Topic: `simulated-city/stadium/occupancy/state`
+- **Publishes:** `agent_control`
+- **Subscribes:** `dashboard`
+- **Message schema (JSON):**
+	- `timestamp` (string, ISO 8601)
+	- `inside_count` (integer)
+	- `approaching_count` (integer)
+	- `exiting_count` (integer)
+	- `denied_total` (integer)
 
-### Simulation limits
-- total persons = 50
-- cohort sizes: searching 20, entering 25, blocked 5
-- max speed, min speed, step distance noise
-- max persons inside (optional safety threshold)
+### Topic: `simulated-city/stadium/system/heartbeat`
+- **Publishes:** `agent_people`, `agent_camera`, `agent_control`, `dashboard`
+- **Subscribes:** `dashboard` (and optional operations monitor)
+- **Message schema (JSON):**
+	- `agent_name` (string)
+	- `timestamp` (string, ISO 8601)
+	- `status` (string: `ok|degraded|error`)
+	- `tick_id` (integer)
 
-### Decision thresholds
-- camera confidence threshold
-- gate proximity threshold (meters) to trigger entry event
-- out-of-bounds threshold for corrective command
+## 3. Configuration Parameters
 
-### Timing
-- simulation tick interval (e.g., 0.5–1.0 s)
-- publish intervals per topic (state faster, occupancy slower)
-- command timeout/retry window
-- heartbeat interval
+Suggested keys for `config.yaml` with realistic defaults:
 
-### Good default assumptions
-- single local broker profile for development, plus optional cloud profile
-- base topic namespace per project (simulated-city/stadium)
-- deterministic random seed for repeatable demos
+### MQTT broker settings
+- `mqtt.profiles.local.host`: `localhost`
+- `mqtt.profiles.local.port`: `1883`
+- `mqtt.profiles.local.username_env`: `MQTT_USER`
+- `mqtt.profiles.local.password_env`: `MQTT_PASS`
+- `mqtt.profiles.local.tls`: `false`
+- `mqtt.profiles.local.keepalive_s`: `60`
+- `mqtt.profiles.local.client_id_prefix`: `stadium-sim`
+- `mqtt.profiles.local.base_topic`: `simulated-city/stadium`
+- `mqtt.active_profiles`: `[local]`
 
-## 4) Ambiguities / Missing Details to Confirm
+### GPS coordinates and map geometry
+- `simulation.stadium.center_lat`: `55.6479`
+- `simulation.stadium.center_lon`: `12.0417`
+- `simulation.stadium.boundary_radius_m`: `220`
+- `simulation.stadium.entries`: list of entry objects with `entry_id`, `lat`, `lon`
+- `simulation.stadium.exit_waypoints`: list of waypoint objects with `waypoint_id`, `lat`, `lon`
 
-- Whether cohort membership is fixed, or if people can transition between yellow/green/red categories dynamically.
-- Exact rule for “allowed”: is it predefined at startup, sensor-derived, or both.
-- Whether denied persons can re-attempt entry or must permanently exit.
-- Definition of “inside stadium” (gate crossing, polygon containment, or both).
-- Counter semantics: current inside count only, or cumulative entries as well.
-- Movement model detail: purely random walk vs waypoint-guided behavior.
-- Required QoS/retain policy per topic and whether offline message replay matters.
-- Whether control decisions are centralized only, or partially autonomous per person agent.
+### Thresholds and limits
+- `simulation.population.total_people`: `50`
+- `simulation.population.max_inside`: `50000`
+- `simulation.motion.min_speed_mps`: `0.8`
+- `simulation.motion.max_speed_mps`: `1.8`
+- `simulation.motion.step_noise_m`: `0.5`
+- `simulation.decision.camera_confidence_threshold`: `0.70`
+- `simulation.decision.entry_proximity_m`: `8`
+- `simulation.decision.out_of_bounds_margin_m`: `15`
+
+### Timing parameters
+- `simulation.timing.tick_interval_s`: `1.0`
+- `simulation.timing.person_state_publish_interval_s`: `1.0`
+- `simulation.timing.occupancy_publish_interval_s`: `2.0`
+- `simulation.timing.command_timeout_s`: `5.0`
+- `simulation.timing.command_retry_interval_s`: `2.0`
+- `simulation.timing.heartbeat_interval_s`: `10.0`
+- `simulation.random.seed`: `42`
+
+## 4. Architecture Decisions
+
+### Notebooks to Create
+- `notebooks/agent_people.ipynb`: simulates person movement, publishes person state and entry events, applies control commands.
+- `notebooks/agent_camera.ipynb`: subscribes to person state near entries and publishes allow/deny decisions.
+- `notebooks/agent_control.ipynb`: consumes camera decisions and entry events, publishes movement commands and occupancy state.
+- `notebooks/dashboard.ipynb`: subscribes to all relevant topics and renders live map plus occupancy counters.
+
+### Library Code (src/simulated_city/)
+
+#### Data models (dataclasses)
+- `PersonState`: person identity, location, state, color, speed, target entry.
+- `CameraDecision`: person ID, allowed flag, reason code, confidence, entry ID.
+- `ControlCommand`: command type, target waypoint, timeout metadata.
+- `EntryEvent`: entered/denied/exited event payload.
+- `OccupancyState`: current counts and timestamp.
+
+#### Utility functions
+- Topic builder helpers using configured `base_topic`.
+- JSON payload validation helpers for required fields/types.
+- Coordinate and distance helpers for entry proximity checks.
+- State transition guard helpers (allowed transitions only).
+
+#### Calculation helpers
+- Entry-zone distance calculations.
+- Occupancy counter update rules from entry events.
+- Target selection for nearest/assigned entry and exit waypoint.
+- Tick-based movement step updates with bounded noise.
+
+### Classes vs Functions
+
+#### Model as classes
+- Stateful agents: people, camera, control, dashboard subscribers.
+- Data models for MQTT messages and simulation state.
+- Optional occupancy tracker with internal counters.
+
+#### Model as functions
+- Pure calculations (distance, heading, step interpolation).
+- Message transformations (dataclass ⇄ dict/json).
+- Stateless validations (schema checks, command validity).
+- Topic formatting and config extraction helpers.
+
+## 5. Open Questions
+
+- Should an initially denied person be allowed to attempt a different entrance later, or always exit permanently?
+- What exact policy determines `allowed` decisions: random probability, rule-based profile flags, or external input?
+- How should entry assignment work: fixed entry per person at startup, or dynamic nearest-entry routing?
+- Is "inside stadium" defined only by gate crossing, or also by position within a stadium boundary polygon?
+- Should occupancy track only current inside count, or also cumulative entered/denied totals for reporting?
+- What MQTT QoS level should be used per topic (`0`, `1`, or `2`), and should any topics be retained?
+- Should command conflict handling be strict (latest command wins) or state-validated (reject conflicting commands)?
+- Are there scenario constraints for camera false positives/false negatives that must be modeled explicitly?

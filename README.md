@@ -1,22 +1,32 @@
 ### My Smart City Project: Overvågning og sikkerhed på Brøndby stadion
 
 ### Step 1: Define Your Simulation (Before Any Code)
-This simulation is of people up to 50 randomly walking around Brøndby football stadium. Security is a high priority at this place because there has been a lot of hooliganism and unsafe behaviour of some of the people that are visiting the stadium. The simulation has to be people walking around the stadium. Out of the 50 people there are 20 people who are walking around trying to find the right entry. 25 people are at a right entry and are getting inside the stadium. The last 5 people are being stopped in the control center because the security camera has detected some earlier criminal issues. They are not allowed to go inside the stadium, so they are going away from the stadium again. 
+This simulation models 50 people moving around Brøndby Stadium. At the start, all people are neutral and shown as white. They walk toward different stadium entrances.
+When a person tries to enter, the security camera evaluates that person:
+- If entry is allowed, the person color changes to green and they enter the stadium.
+- If entry is denied, the person color changes to red and they walk away from the stadium.
+
+The number of allowed and denied people is not fixed in advance. It is decided dynamically by the camera/control logic during the simulation.
 
 #### 1. The Trigger (Who/What is moving?)
-50 random persons with randomly chosen names from a list and associated colour for mapping purposes walk randomly around. 
-Enviroment: 20 people walks around the stadium (They have yellow color), 25 people are getting tickets scanned end gets inside the stadium (They have green color) and 5 people are being stopped in the security (They have red color), so they are moving away from the stadium again. 
+50 people with random names move toward different entrances around the stadium.
+All start as white (neutral status). Their status can change only when they attempt entry.
 
 #### 2. The Observer (What does the city see?)
-Camera sensor that tells if people are allowed to attend the stadium and if they are allowed then they are walking inside (Red color people can’t get inside, but yellow and green color can always get inside)
+A camera sensor observes people at entry points and decides whether each person is allowed to enter.
+The observer produces an allow/deny result for each entry attempt.
 
 #### 3. The Control Center (The Logic)
-Tell people to go inside the stadium, around the stadium or away from the stadium. The color can tell the control center if they are allowed or not to enter the stadium.
+The control center receives camera decisions and sends movement instructions:
+- Allowed person → enter stadium (turn green)
+- Denied person → leave stadium area (turn red)
 
 #### 4. The Response (What happens next?)
-People go inside the stadium if they are allowed. The people who is not allowed are walking away and the people who is trying to find the right enter are still walking or entering the stadium.
-The map shows peoples location and the location stadium and around
-When people are entering the stadium the map should have a counter, so it the security system knows how many people there are inside.
+People follow the control decision:
+- Green people move into the stadium
+- Red people move away from the stadium
+
+The map shows all live positions and colors, plus a counter of how many people are currently inside the stadium.
 
 ---
 
