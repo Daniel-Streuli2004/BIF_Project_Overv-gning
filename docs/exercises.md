@@ -63,6 +63,27 @@ In this phase, you focus on camera logic:
 
 Do not add dashboard visualization in this phase.
 
+## Phase 5 Exercise: Add Dashboard Visualization (anymap-ts)
+
+Create `notebooks/dashboard.ipynb` as a visualization-only notebook.
+
+In this phase, you focus on dashboard behavior only:
+- Use `anymap-ts` (`from anymap_ts import Map`) for live map rendering.
+- Subscribe to:
+    - `simulated-city/stadium/person/state`
+    - `simulated-city/stadium/camera/decision`
+    - `simulated-city/stadium/entry/event`
+- Render one marker per person and update marker color from payload `color`:
+    - `white`, `green`, `red`
+- Track occupancy from gate events:
+    - increment for `entered`
+    - decrement for `exited` (never below zero)
+- Keep dashboard read-only:
+    - no control decisions
+    - no gate command publishing
+
+Do not add Phase 6+ logic in this phase.
+
 ## Example Structure
 
 ```

@@ -1,163 +1,169 @@
-# Phase 4 Runtime Guide (stored in `docs/phase_1_runtime.md`)
+# Phase 5 Runtime Guide (stored in `docs/phase_1_runtime.md`)
 
-This document describes exactly what was implemented for Phase 4 and how you validate it.
+This document describes exactly what was implemented for Phase 5 and how you validate it.
 
 ## 1. What Was Created
 
 - Notebook created:
-  - `notebooks/agent_camera.ipynb`
+  - `notebooks/dashboard.ipynb`
 - Documentation updated:
-  - `docs/mqtt.md`
+  - `docs/maplibre_anymap.md`
   - `docs/exercises.md`
   - `docs/phase_1_runtime.md`
-- Existing notebook used (from Phase 3):
+- Existing notebooks used (from earlier phases):
   - `notebooks/agent_people.ipynb`
+  - `notebooks/agent_camera.ipynb`
 - Library modules added in `src/simulated_city/`:
   - None
 - Configuration changes in `config.yaml`:
-  - none in this phase
+  - None in this phase
 
 ## 2. How to Run
 
-### Workflow A: Start the camera agent
+### Workflow A: Start People Agent
 
 1. Start JupyterLab:
    - `python -m jupyterlab`
-2. Open `notebooks/agent_camera.ipynb`.
-3. Run cells 1-5 in order.
-4. Keep the camera notebook running (Cell 6 loop).
+2. Open `notebooks/agent_people.ipynb`.
+3. Run cells 1-8 in order.
+4. Observe output in final cell:
+   - `Phase 3 simulation + publishing complete.`
 
-### Workflow B: Start the people agent (publisher)
+### Workflow B: Start Camera Agent
 
-1. Open `notebooks/agent_people.ipynb`.
-2. Run cells 1-8 in order.
-3. This sends `person/state` and `entry/event` messages that the camera reacts to.
+1. Open `notebooks/agent_camera.ipynb`.
+2. Run cells 1-6 in order.
+3. Observe output in Cell 6:
+   - `Camera agent running. Press Interrupt to stop.`
 
-### Workflow C: Monitor topics from terminal
+### Workflow C: Start Dashboard
 
-Run this in another terminal to observe published messages:
+1. Open `notebooks/dashboard.ipynb`.
+2. Run cell 1 (markdown for context), then run code cells 2-6 in order.
+3. In Cell 2, observe:
+   - `Loaded config. MQTT base topic: simulated-city/stadium`
+4. In Cell 3, observe:
+   - `Map created with OpenStreetMap.Mapnik basemap.`
+5. In Cell 4, observe topic subscriptions:
+   - `Subscribing to: simulated-city/stadium/person/state`
+   - `Subscribing to: simulated-city/stadium/camera/decision`
+   - `Subscribing to: simulated-city/stadium/entry/event`
+6. In Cell 6, keep loop running and observe heartbeats:
+   - Prefix: `heartbeat -> person_msgs=`
+7. Observe map behavior:
+   - People markers appear and update color (`white`, `green`, `red`) as messages arrive.
+
+### Workflow D: Optional Topic Monitor
+
+Run in a terminal:
 
 ```bash
 mosquitto_sub -h broker.mqttdashboard.com -p 1883 -t "simulated-city/stadium/#" -v
 ```
 
-You should see all three topics in real time:
+You should see:
 - `simulated-city/stadium/person/state`
-- `simulated-city/stadium/entry/event`
 - `simulated-city/stadium/camera/decision`
-
-### Workflow D: Run project verification commands
-
-1. `python scripts/verify_setup.py`
-2. `python scripts/validate_structure.py`
-3. `python -m pytest`
+- `simulated-city/stadium/entry/event`
 
 ## 3. Expected Output
 
-### Camera notebook outputs
+### Dashboard notebook outputs
 
-- **Cell 2 (imports + config):**
+- **Cell 2 (imports + config load):**
   - Exact line: `Loaded config. MQTT base topic: simulated-city/stadium`
-  - Exact line: `Simulation section present: True`
+  - Prefix: `Dashboard center: lat=`
 
-- **Cell 3 (decision settings):**
-  - Exact prefix line: `Decision settings -> allow=`
-  - Exact line: `Reason-code taxonomy size: 6`
+- **Cell 3 (map setup):**
+  - Exact line: `Map created with OpenStreetMap.Mapnik basemap.`
+  - A map widget appears centered near Brøndby Stadium.
 
-- **Cell 4 (MQTT connection):**
-  - Exact prefix line: `Connected to MQTT broker at `
-  - Exact line: `Subscribing to: simulated-city/stadium/person/state`
-  - Exact line: `Publishing decisions to: simulated-city/stadium/camera/decision`
+- **Cell 4 (MQTT setup):**
+  - Prefix: `Connected to MQTT broker at `
+  - Exact lines:
+    - `Subscribing to: simulated-city/stadium/person/state`
+    - `Subscribing to: simulated-city/stadium/camera/decision`
+    - `Subscribing to: simulated-city/stadium/entry/event`
 
-- **Cell 5 (callback setup):**
-  - Exact line: `Camera callback registered and subscription active.`
+- **Cell 5 (callbacks):**
+  - Exact line: `Dashboard subscriptions active.`
+  - Repeating status prefix while messages flow:
+    - `dashboard status -> people=`
 
-- **Cell 6 (run loop):**
-  - Exact line: `Camera agent running. Press Interrupt to stop.`
-  - Exact prefix line every ~5s: `status decisions=`
-  - Decision callback lines as messages arrive:
-    - `decision#<n> person=<id> allowed=<True|False> reason=<reason_code> confidence=<value> publish_ok=True`
+- **Cell 6 (keep-alive loop):**
+  - Exact line: `Dashboard running. Press Interrupt to stop.`
+  - Repeating heartbeat prefix every ~5s:
+    - `heartbeat -> person_msgs=`
 
-### Terminal monitor output
+### Meaning of different output
 
-Expected topic prefixes:
-
-- `simulated-city/stadium/person/state`
-- `simulated-city/stadium/entry/event`
-- `simulated-city/stadium/camera/decision`
-
-### If output is different
-
-- If no `camera/decision` messages appear, ensure camera notebook Cell 6 is running.
-- If no decisions are printed, ensure people notebook is publishing `person/state`.
-- If `publish_ok=False` appears, verify broker connectivity and topic permissions.
+- If map appears but no markers update:
+  - Dashboard is running but no `person/state` messages are arriving.
+- If marker counts increase but colors do not change:
+  - Check incoming payload includes `color` field.
+- If `inside_count` never changes:
+  - Check `entry/event` messages include `event_type` of `entered` or `exited`.
 
 ### Success criteria
 
-- Camera notebook subscribes to `person/state` successfully.
-- Camera notebook publishes `camera/decision` messages with taxonomy reason codes.
-- End-to-end flow works between people agent and camera agent.
+- Dashboard subscribes to all three topics.
+- Marker colors reflect incoming `person/state.color` values.
+- `inside_count` changes only from `entry/event` gate events.
+- Dashboard remains read-only and does not publish control decisions.
 
-## 4. MQTT Topics (if applicable)
-
-Phase 4 uses and extends topic flow:
+## 4. MQTT Topics
 
 - `simulated-city/stadium/person/state`
   - Publisher: `notebooks/agent_people.ipynb`
-  - Subscriber: `notebooks/agent_camera.ipynb`
+  - Subscriber: `notebooks/dashboard.ipynb`
   - Key schema:
-    - `person_id`, `name`, `timestamp`, `lat`, `lon`, `state`, `color`, `speed_mps`, `target_entry_id`
-
-- `simulated-city/stadium/entry/event`
-  - Publisher: `notebooks/agent_people.ipynb`
-  - Key schema:
-    - `person_id`, `timestamp`, `event_type`, `entry_id`
+    - `person_id`, `timestamp`, `lat`, `lon`, `state`, `color`, `target_entry_id`
 
 - `simulated-city/stadium/camera/decision`
   - Publisher: `notebooks/agent_camera.ipynb`
+  - Subscriber: `notebooks/dashboard.ipynb`
   - Key schema:
-    - `person_id` (string)
-    - `timestamp` (ISO string)
-    - `allowed` (boolean)
-    - `reason_code` (`allowed_lucky|allowed_clear|denied_unlucky|denied_flagged|camera_false_positive|camera_false_negative`)
-    - `confidence` (number)
-    - `entry_id` (string)
+    - `person_id`, `timestamp`, `allowed`, `reason_code`, `confidence`, `entry_id`
+
+- `simulated-city/stadium/entry/event`
+  - Publisher: `notebooks/agent_people.ipynb`
+  - Subscriber: `notebooks/dashboard.ipynb`
+  - Key schema:
+    - `person_id`, `timestamp`, `event_type`, `entry_id`
 
 ## 5. Debugging Guidance
 
-### Enable more visibility
+### Increase log visibility
 
-- In camera notebook Cell 5, temporarily print incoming payload before decision build.
-- In terminal monitor, keep `-v` enabled to include topic names.
+- In dashboard Cell 5, temporarily print raw payloads inside `on_message`.
+- Keep Cell 6 running to view heartbeat counters.
 
 ### Common errors and solutions
 
 - **`ModuleNotFoundError: simulated_city`**
-  - Run commands from repository root with:
-  - `PYTHONPATH=src`
-  - or install editable package: `pip install -e ".[dev,notebooks]"`
+  - Install editable package from repo root:
+  - `pip install -e ".[dev,notebooks]"`
 
-- **MQTT connection timeout/failure**
-  - Check broker host/port in `config.yaml` active profile.
-  - Test broker with `mosquitto_pub` and `mosquitto_sub`.
+- **`ModuleNotFoundError: anymap_ts`**
+  - Ensure notebooks extras are installed:
+  - `pip install -e ".[notebooks]"`
 
-- **No messages in monitor**
-  - Ensure people notebook simulation cell has been run.
-  - Ensure monitor topic is `simulated-city/stadium/#`.
+- **No MQTT messages received**
+  - Verify active profile broker settings in `config.yaml`.
+  - Confirm people/camera notebooks are running.
 
-- **No camera decisions**
-  - Ensure camera notebook run-loop cell is active.
-  - Ensure incoming person state has `state="approaching_entry"`.
+- **No occupancy changes**
+  - Verify `entry/event` traffic contains `event_type=entered` or `event_type=exited`.
 
-- **Publish failures increase**
-  - Verify internet/network path to broker.
-  - Re-run camera connection cell to reconnect broker client.
+### Verify MQTT flow
 
-### MQTT flow checks
+Use:
 
-- Use:
-  - `mosquitto_sub -h broker.mqttdashboard.com -p 1883 -t "simulated-city/stadium/#" -v`
-  - You should see state, event, and camera decision topics while both notebooks run.
+```bash
+mosquitto_sub -h broker.mqttdashboard.com -p 1883 -t "simulated-city/stadium/#" -v
+```
+
+You should see all three topic families while notebooks are active.
 
 ## 6. Verification Commands
 

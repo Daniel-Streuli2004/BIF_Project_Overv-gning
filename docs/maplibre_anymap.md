@@ -13,6 +13,57 @@ It is intentionally not a full anymap-ts manual — it focuses on the functions 
 python -m pip install -e ".[notebooks]"
 ```
 
+## Phase 5 dashboard pattern (workshop)
+
+Use one dedicated notebook (`notebooks/dashboard.ipynb`) as a read-only visualization component.
+
+Dashboard rules in this workshop:
+
+- Subscribe to MQTT topics:
+    - `simulated-city/stadium/person/state`
+    - `simulated-city/stadium/camera/decision`
+    - `simulated-city/stadium/entry/event`
+- Render person markers with semantic colors:
+    - `white` (not yet decided)
+    - `green` (allowed)
+    - `red` (denied)
+- Track occupancy using event messages:
+    - `entered` => `inside_count += 1`
+    - `exited` => `inside_count -= 1` (never below `0`)
+- Keep notebook lightweight:
+    - no control/decision logic
+    - no publishing commands for gate control
+
+Minimal setup pattern:
+
+```python
+from anymap_ts import Map
+from simulated_city.config import load_config
+import simulated_city.mqtt as mqtt
+
+cfg = load_config()
+sim_cfg = cfg.simulation
+mqtt_cfg = cfg.mqtt
+
+map_view = Map(center=(sim_cfg.center_lon, sim_cfg.center_lat), zoom=16.5, height="650px")
+map_view.add_basemap("OpenStreetMap.Mapnik")
+
+client = mqtt.connect_mqtt(mqtt_cfg)
+client.subscribe(f"{mqtt_cfg.base_topic}/person/state", qos=0)
+client.subscribe(f"{mqtt_cfg.base_topic}/camera/decision", qos=0)
+client.subscribe(f"{mqtt_cfg.base_topic}/entry/event", qos=0)
+```
+
+Color mapping used in Phase 5:
+
+```python
+COLOR_HEX = {
+        "white": "#FFFFFF",
+        "green": "#2E7D32",
+        "red": "#C62828",
+}
+```
+
 
 ## Coordinates
 
