@@ -1,33 +1,22 @@
-# simulated-city-template
-
-This is a template repository.
-
-Get started by reading [docs/setup.md](docs/setup.md).
-See [docs/overview.md](docs/overview.md) for an overview of the base module content.
-
-## Template for a project
+### My Smart City Project: Overvågning og sikkerhed på Brøndby stadion
 
 ### Step 1: Define Your Simulation (Before Any Code)
-
-Use this template to describe your project. Think about these four components and the messages they send between each other:
-
-### My Smart City Project: [Project Name]
+This simulation is of people up to 50 randomly walking around Brøndby football stadium. Security is a high priority at this place because there has been a lot of hooliganism and unsafe behaviour of some of the people that are visiting the stadium. The simulation has to be people walking around the stadium. Out of the 50 people there are 20 people who are walking around trying to find the right entry. 25 people are at a right entry and are getting inside the stadium. The last 5 people are being stopped in the control center because the security camera has detected some earlier criminal issues. They are not allowed to go inside the stadium, so they are going away from the stadium again. 
 
 #### 1. The Trigger (Who/What is moving?)
-Describe the **Agents** (Humans, Animals, Vehicles) and the **Surroundings** (Weather, Time).
-*Example: A citizen drops a pizza box into the smart-bin.*
+50 random persons with randomly chosen names from a list and associated colour for mapping purposes walk randomly around. 
+Enviroment: 20 people walks around the stadium (They have yellow color), 25 people are getting tickets scanned end gets inside the stadium (They have green color) and 5 people are being stopped in the security (They have red color), so they are moving away from the stadium again. 
 
 #### 2. The Observer (What does the city see?)
-What **Sensor** picks up the information? 
-*Example: An infrared sensor inside the bin detects the height of the trash.*
+Camera sensor that tells if people are allowed to attend the stadium and if they are allowed then they are walking inside (Red color people can’t get inside, but yellow and green color can always get inside)
 
 #### 3. The Control Center (The Logic)
-How does the city "think" about this information?
-*Example: If the trash height is more than 80%, send a signal to the garbage department.*
+Tell people to go inside the stadium, around the stadium or away from the stadium. The color can tell the control center if they are allowed or not to enter the stadium.
 
 #### 4. The Response (What happens next?)
-What is the **Controller** that changes the city?
-*Example: A digital map in the garbage truck updates to show a "High Priority" pickup.*
+People go inside the stadium if they are allowed. The people who is not allowed are walking away and the people who is trying to find the right enter are still walking or entering the stadium.
+The map shows peoples location and the location stadium and around
+When people are entering the stadium the map should have a counter, so it the security system knows how many people there are inside.
 
 ---
 
