@@ -11,6 +11,19 @@ Each agent or component is a **separate notebook** that:
 
 This is how real systems work — agents are independent processes.
 
+## Phase 1 Exercise: Single Agent Without MQTT (Local Logic Only)
+
+Create `notebooks/agent_people.ipynb` as your first minimal phase.
+
+In this phase, you focus only on local simulation behavior:
+- Load settings with `simulated_city.config.load_config()`
+- Simulate 50 people moving toward entries
+- Start everyone as `white`
+- Change to `green` when allowed at entry
+- Change to `red` and exit permanently when denied
+
+Do not add MQTT publish/subscribe in Phase 1. Keep the notebook local and easy to understand.
+
 ## Example Structure
 
 ```
