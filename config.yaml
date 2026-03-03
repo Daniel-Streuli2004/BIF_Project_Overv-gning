@@ -61,79 +61,79 @@ simulation:
   total_people: 50
 
   # Stadium map definition
-  stadium: 
-    center_lat: 55.648178388030644
-    center_lon: 12.41841765058267
+  stadium:
+    center_lat: 55.65000000000000
+    center_lon: 12.41860000000000
     boundary_radius_m: 220
 
     # Entry points (used in Phase 1 notebook via simulation.locations fallback-compatible mapping)
     entries:
       - entry_id: E1
-        lat: 55.6493
-        lon: 12.0408
+        lat: 55.64970000000000
+        lon: 12.41770000000000
       - entry_id: E2
-        lat: 55.6491
-        lon: 12.0428
+        lat: 55.65100000000000
+        lon: 12.41780000000000
       - entry_id: E3
-        lat: 55.6467
-        lon: 12.0427
+        lat: 55.65100000000000
+        lon: 12.41950000000000
       - entry_id: E4
-        lat: 55.6466
-        lon: 12.0406
+        lat: 55.64970000000000
+        lon: 12.41950000000000
 
     # Gate crossing geometry for "inside stadium" decisions
     entry_gate_lines:
       - entry_id: E1
-        lat1: 55.64935
-        lon1: 12.04070
-        lat2: 55.64922
-        lon2: 12.04095
+        lat1: 55.64972000000000
+        lon1: 12.41765000000000
+        lat2: 55.64968000000000
+        lon2: 12.41775000000000
       - entry_id: E2
-        lat1: 55.64915
-        lon1: 12.04265
-        lat2: 55.64900
-        lon2: 12.04292
+        lat1: 55.65102000000000
+        lon1: 12.41775000000000
+        lat2: 55.65098000000000
+        lon2: 12.41785000000000
       - entry_id: E3
-        lat1: 55.64675
-        lon1: 12.04255
-        lat2: 55.64660
-        lon2: 12.04282
+        lat1: 55.65102000000000
+        lon1: 12.41945000000000
+        lat2: 55.65098000000000
+        lon2: 12.41955000000000
       - entry_id: E4
-        lat1: 55.64672
-        lon1: 12.04045
-        lat2: 55.64652
-        lon2: 12.04072
+        lat1: 55.64972000000000
+        lon1: 12.41945000000000
+        lat2: 55.64968000000000
+        lon2: 12.41955000000000
     gate_crossing_tolerance_m: 1.5
 
     # Exit targets for denied people
     exit_waypoints:
       - waypoint_id: X1
-        lat: 55.6509
-        lon: 12.0388
+        lat: 55.65160000000000
+        lon: 12.41700000000000
       - waypoint_id: X2
-        lat: 55.6509
-        lon: 12.0446
+        lat: 55.64860000000000
+        lon: 12.41700000000000
       - waypoint_id: X3
-        lat: 55.6448
-        lon: 12.0446
+        lat: 55.64860000000000
+        lon: 12.42010000000000
       - waypoint_id: X4
-        lat: 55.6448
-        lon: 12.0388
+        lat: 55.65160000000000
+        lon: 12.42010000000000
 
   # Backward-compatible location list for existing SimulationConfig parser and Phase 1 notebook
   locations:
     - id: E1
-      lat: 55.6493
-      lon: 12.0408
+      lat: 55.64970000000000
+      lon: 12.41770000000000
     - id: E2
-      lat: 55.6491
-      lon: 12.0428
+      lat: 55.65100000000000
+      lon: 12.41780000000000
     - id: E3
-      lat: 55.6467
-      lon: 12.0427
+      lat: 55.65100000000000
+      lon: 12.41950000000000
     - id: E4
-      lat: 55.6466
-      lon: 12.0406
+      lat: 55.64970000000000
+      lon: 12.41950000000000
 
   # Movement and routing
   motion:
