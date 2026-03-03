@@ -1,0 +1,1549 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Simulated City Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- MapLibre GL JS -->
+    <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" rel="stylesheet" />
+    <!-- PMTiles -->
+    <script src="https://unpkg.com/pmtiles@3.0.8/dist/pmtiles.js"></script>
+    <!-- maplibre-gl-layer-control CSS -->
+    <link href="https://unpkg.com/maplibre-gl-layer-control@0.13.0/dist/maplibre-gl-layer-control.css" rel="stylesheet" />
+    <!-- maplibre-gl-components CSS -->
+    <link href="https://unpkg.com/maplibre-gl-components@0.14.0/dist/maplibre-gl-components.css" rel="stylesheet" />
+    <!-- Geoman for drawing -->
+    <script src="https://cdn.jsdelivr.net/npm/@geoman-io/maplibre-geoman-free@0.6.1/dist/maplibre-geoman.umd.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/@geoman-io/maplibre-geoman-free@0.6.1/dist/maplibre-geoman.css" rel="stylesheet" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script type="module">
+        // Map state from Python
+        const state = {
+  "center": [
+    12.41841765058267,
+    55.648178388030644
+  ],
+  "zoom": 16.5,
+  "style": "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+  "bearing": 0.0,
+  "pitch": 0.0,
+  "width": "100%",
+  "height": "650px",
+  "layers": {},
+  "sources": {},
+  "controls": {
+    "layer-control": {
+      "layers": [],
+      "position": "top-right",
+      "collapsed": true
+    },
+    "control-grid": {
+      "position": "top-right",
+      "collapsed": true,
+      "collapsible": true
+    }
+  },
+  "max_pitch": 85.0,
+  "js_calls": [
+    {
+      "id": 1,
+      "method": "addLayerControl",
+      "args": [],
+      "kwargs": {
+        "layers": [],
+        "position": "top-right",
+        "collapsed": true
+      }
+    },
+    {
+      "id": 2,
+      "method": "addControlGrid",
+      "args": [],
+      "kwargs": {
+        "position": "top-right",
+        "collapsed": true,
+        "collapsible": true,
+        "showRowColumnControls": true,
+        "gap": 2
+      }
+    },
+    {
+      "id": 3,
+      "method": "addBasemap",
+      "args": [
+        "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+      ],
+      "kwargs": {
+        "attribution": "(C) OpenStreetMap contributors",
+        "name": "OpenStreetMap.Mapnik"
+      }
+    }
+  ]
+};
+
+        // Track added layers for layer control
+        const addedLayers = [];
+        let layerControlConfig = null;
+        let drawControlConfig = null;
+        let controlGridConfig = null;
+        let controlGridAdded = false;
+        let layerControlAdded = false;
+
+        // Load optional dependencies in parallel (non-blocking)
+        let LayerControl = null;
+        let addControlGridFn = null;
+
+        const lcPromise = import('https://esm.sh/maplibre-gl-layer-control@0.13.0')
+            .then(mod => { LayerControl = mod.LayerControl; })
+            .catch(() => console.warn('LayerControl library unavailable — layer control will be skipped'));
+
+        const cgPromise = import('https://esm.sh/maplibre-gl-components@0.14.0')
+            .then(mod => { addControlGridFn = mod.addControlGrid; })
+            .catch(() => console.warn('ControlGrid library unavailable — control grid will be skipped'));
+
+        // deck.gl COG layer support (lazy-loaded on first use)
+        let MapboxOverlay = null;
+        let COGLayer = null;
+        let COGLayerWithOpacity = null;
+        let geoKeysParser = null;
+        let deckOverlay = null;
+        const deckLayers = new Map();
+
+        async function ensureDeckGL() {
+            if (MapboxOverlay) return;
+            // Use the deck.gl version already loaded by maplibre-gl-components,
+            // or fall back to 9.2.6. All deck.gl packages must share one version
+            // to avoid the "multiple versions detected" error.
+            const V = (globalThis.deck && globalThis.deck.VERSION) || '9.2.6';
+            const [cogModule, deckMapbox, geokeysModule] = await Promise.all([
+                import(`https://esm.sh/@developmentseed/deck.gl-geotiff@0.2.0?deps=@deck.gl/core@${V},@deck.gl/layers@${V},@deck.gl/geo-layers@${V},@deck.gl/mesh-layers@${V},@deck.gl/extensions@${V}`),
+                import(`https://esm.sh/@deck.gl/mapbox@${V}?deps=@deck.gl/core@${V}`),
+                import('https://esm.sh/geotiff-geokeys-to-proj4@2024.4.13'),
+            ]);
+            COGLayer = cogModule.COGLayer;
+            MapboxOverlay = deckMapbox.MapboxOverlay;
+            const toProj4 = geokeysModule.toProj4;
+            const proj = cogModule.proj;
+            geoKeysParser = async (geoKeys) => {
+                const projDef = toProj4(geoKeys);
+                return {
+                    def: projDef.proj4,
+                    parsed: proj.parseCrs(projDef.proj4),
+                    coordinatesUnits: projDef.coordinatesUnits,
+                };
+            };
+
+            // Define COGLayerWithOpacity subclass after COGLayer is loaded
+            // This wrapper propagates opacity to sublayers since the base COGLayer
+            // does not pass opacity to its RasterLayer/PathLayer sublayers.
+            COGLayerWithOpacity = class extends COGLayer {
+                _renderSubLayers(...args) {
+                    const layers = super._renderSubLayers(...args);
+                    const opacity = this.props.opacity;
+                    if (opacity === undefined || opacity === null) {
+                        return layers;
+                    }
+                    const clamped = Math.max(0, Math.min(1, opacity));
+                    return this._applyOpacity(layers, clamped);
+                }
+                _applyOpacity(layers, opacity) {
+                    if (!layers) return layers;
+                    if (Array.isArray(layers)) {
+                        return layers.map(layer => this._applyOpacity(layer, opacity));
+                    }
+                    if (typeof layers.clone === 'function') {
+                        return layers.clone({ opacity });
+                    }
+                    return layers;
+                }
+            };
+        }
+
+        const DECK_SENTINEL_ID = '__deck-overlay-anchor';
+
+        function initDeckOverlay() {
+            if (deckOverlay) return;
+            deckOverlay = new MapboxOverlay({ interleaved: true, layers: [] });
+            map.addControl(deckOverlay);
+            // Add invisible sentinel layer as ordering anchor
+            if (!map.getLayer(DECK_SENTINEL_ID)) {
+                const sentinelSourceId = DECK_SENTINEL_ID + '-source';
+                if (!map.getSource(sentinelSourceId)) {
+                    map.addSource(sentinelSourceId, {
+                        type: 'geojson',
+                        data: { type: 'FeatureCollection', features: [] }
+                    });
+                }
+                // Insert sentinel below the first non-raster user overlay layer
+                // (skip basemap raster layers so COG renders above them)
+                const firstOverlay = addedLayers.find(l => l.type !== 'raster');
+                const sentinelBeforeId = firstOverlay ? firstOverlay.id : undefined;
+                map.addLayer({
+                    id: DECK_SENTINEL_ID,
+                    type: 'fill',
+                    source: sentinelSourceId,
+                    paint: { 'fill-opacity': 0 }
+                }, sentinelBeforeId);
+            }
+        }
+
+        function updateDeckOverlay(forceReanchor = false) {
+            if (!deckOverlay) return;
+            const hasSentinel = map.getLayer(DECK_SENTINEL_ID);
+            if (hasSentinel) {
+                for (const [id, layer] of deckLayers) {
+                    if (layer.clone && (forceReanchor || !layer.props || !layer.props.beforeId)) {
+                        deckLayers.set(id, layer.clone({ beforeId: DECK_SENTINEL_ID }));
+                    }
+                }
+            }
+            if (forceReanchor) {
+                deckOverlay.setProps({ layers: [] });
+            }
+            deckOverlay.setProps({ layers: Array.from(deckLayers.values()) });
+            map.triggerRepaint();
+            scheduleLayerControlOrderSync();
+        }
+
+        function setCOGVisibility(layerId, visible) {
+            const layer = deckLayers.get(layerId);
+            if (!layer) return;
+            deckLayers.set(layerId, layer.clone({ visible }));
+            updateDeckOverlay();
+        }
+
+        function setCOGOpacity(layerId, opacity) {
+            const layer = deckLayers.get(layerId);
+            if (!layer) return;
+            deckLayers.set(layerId, layer.clone({ opacity }));
+            updateDeckOverlay();
+        }
+
+        // COG layer display names for the adapter
+        const cogLayerNames = new Map();
+        const cogChangeCallbacks = [];
+
+        // CustomLayerAdapter for COG layers — used by maplibre-gl-layer-control
+        const cogLayerAdapter = {
+            type: 'cog',
+            getLayerIds() {
+                return Array.from(deckLayers.keys());
+            },
+            getLayerState(layerId) {
+                const layer = deckLayers.get(layerId);
+                if (!layer || !layer.props) return null;
+                return {
+                    visible: layer.props.visible !== false,
+                    opacity: layer.props.opacity ?? 1,
+                    name: cogLayerNames.get(layerId) || layerId,
+                };
+            },
+            setVisibility(layerId, visible) {
+                setCOGVisibility(layerId, visible);
+            },
+            setOpacity(layerId, opacity) {
+                setCOGOpacity(layerId, opacity);
+            },
+            getName(layerId) {
+                return cogLayerNames.get(layerId) || layerId;
+            },
+            getSymbolType() {
+                return 'cog';
+            },
+            onLayerChange(callback) {
+                cogChangeCallbacks.push(callback);
+                return () => {
+                    const idx = cogChangeCallbacks.indexOf(callback);
+                    if (idx >= 0) cogChangeCallbacks.splice(idx, 1);
+                };
+            },
+        };
+
+        // Marker layer tracking for layer control
+        const markerGroups = new Map();       // groupId -> Marker[]
+        const markerGroupNames = new Map();   // groupId -> display name
+        const markerGroupVisibility = new Map(); // groupId -> boolean
+        const markerGroupOpacity = new Map(); // groupId -> number
+        const markerChangeCallbacks = [];
+
+        const markerLayerAdapter = {
+            type: 'marker',
+            getLayerIds() {
+                return Array.from(markerGroups.keys());
+            },
+            getLayerState(layerId) {
+                if (!markerGroups.has(layerId)) return null;
+                return {
+                    visible: markerGroupVisibility.get(layerId) ?? true,
+                    opacity: markerGroupOpacity.get(layerId) ?? 1,
+                    name: this.getName(layerId),
+                };
+            },
+            setVisibility(layerId, visible) {
+                const markers = markerGroups.get(layerId);
+                if (!markers) return;
+                markerGroupVisibility.set(layerId, visible);
+                for (const m of markers) {
+                    if (visible) {
+                        m.addTo(map);
+                        const opacity = markerGroupOpacity.get(layerId) ?? 1;
+                        m.getElement().style.opacity = String(opacity);
+                    } else {
+                        m.remove();
+                    }
+                }
+            },
+            setOpacity(layerId, opacity) {
+                const markers = markerGroups.get(layerId);
+                if (!markers) return;
+                markerGroupOpacity.set(layerId, opacity);
+                const visible = markerGroupVisibility.get(layerId) ?? true;
+                if (visible) {
+                    for (const m of markers) {
+                        m.getElement().style.opacity = String(opacity);
+                    }
+                }
+            },
+            getName(layerId) {
+                const name = markerGroupNames.get(layerId);
+                if (name && name !== layerId) return name;
+                if (layerId.startsWith('markers-')) {
+                    const num = parseInt(layerId.slice('markers-'.length), 10);
+                    return isNaN(num) ? layerId : `Markers ${num + 1}`;
+                }
+                if (layerId.startsWith('marker-')) {
+                    const num = parseInt(layerId.slice('marker-'.length), 10);
+                    return isNaN(num) ? layerId : `Marker ${num + 1}`;
+                }
+                return layerId;
+            },
+            getSymbolType() {
+                return 'circle';
+            },
+            removeLayer(layerId) {
+                const markers = markerGroups.get(layerId);
+                if (markers) {
+                    for (const m of markers) m.remove();
+                }
+                markerGroups.delete(layerId);
+                markerGroupNames.delete(layerId);
+                markerGroupVisibility.delete(layerId);
+                markerGroupOpacity.delete(layerId);
+                markerChangeCallbacks.forEach(cb => cb('remove', layerId));
+            },
+            onLayerChange(callback) {
+                markerChangeCallbacks.push(callback);
+                return () => {
+                    const idx = markerChangeCallbacks.indexOf(callback);
+                    if (idx >= 0) markerChangeCallbacks.splice(idx, 1);
+                };
+            },
+        };
+
+        // Create map immediately (no imports needed)
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: state.style,
+            center: state.center,
+            zoom: state.zoom,
+            bearing: state.bearing || 0,
+            pitch: state.pitch || 0,
+            maxPitch: state.max_pitch || 85
+        });
+
+        // Initialize PMTiles protocol
+        if (typeof pmtiles !== 'undefined') {
+            const protocol = new pmtiles.Protocol();
+            maplibregl.addProtocol("pmtiles", protocol.tile);
+        }
+
+        map.on('load', async function() {
+            // 1. Replay ALL js_calls first (markers, legends, GeoJSON, etc.)
+            for (const call of state.js_calls || []) {
+                try {
+                    await executeMethod(call.method, call.args, call.kwargs);
+                } catch (e) {
+                    console.error('Error executing', call.method, e);
+                }
+            }
+
+            // 2. Wait for optional imports to settle
+            await Promise.allSettled([lcPromise, cgPromise]);
+
+            // 3. Add layer control if library loaded and configured
+            if (!layerControlAdded && (layerControlConfig || (state.controls && state.controls['layer-control']))) {
+                const config = layerControlConfig || state.controls['layer-control'];
+                if (LayerControl) {
+                    createLayerControl(config);
+                    layerControlAdded = true;
+                } else {
+                    console.warn('LayerControl not available — skipping layer control');
+                }
+            }
+
+            // 4. Add control grid if library loaded and configured
+            if (!controlGridAdded && (controlGridConfig || (state.controls && state.controls['control-grid']))) {
+                const config = controlGridConfig || state.controls['control-grid'];
+                if (addControlGridFn) {
+                    addControlGridFn(map, {
+                        position: config.position || 'top-right',
+                        defaultControls: config.defaultControls,
+                        exclude: config.exclude,
+                        rows: config.rows,
+                        columns: config.columns,
+                        collapsed: config.collapsed !== false
+                    });
+                    controlGridAdded = true;
+                } else {
+                    console.warn('ControlGrid not available — skipping control grid');
+                }
+            }
+
+            // 5. Add draw control if configured
+            if (drawControlConfig || (state.controls && state.controls['draw-control'])) {
+                createDrawControl(drawControlConfig || state.controls['draw-control']);
+            }
+        });
+
+        async function executeMethod(method, args, kwargs) {
+            switch (method) {
+                case 'addBasemap': {
+                    const url = args[0];
+                    const name = kwargs.name || 'basemap';
+                    const sourceId = 'basemap-' + name;
+                    const layerId = name;
+                    if (!map.getSource(sourceId)) {
+                        map.addSource(sourceId, {
+                            type: 'raster',
+                            tiles: [url],
+                            tileSize: 256,
+                            attribution: kwargs.attribution || ''
+                        });
+                    }
+                    if (!map.getLayer(layerId)) {
+                        // Insert basemap above background but below deck sentinel
+                        // and user overlay layers
+                        let effectiveBeforeId;
+                        if (map.getLayer(DECK_SENTINEL_ID)) {
+                            const styleLayers = map.getStyle()?.layers || [];
+                            const si = styleLayers.findIndex(l => l.id === DECK_SENTINEL_ID);
+                            let ii = si;
+                            for (let i = si - 1; i >= 0; i--) {
+                                if (styleLayers[i].id.startsWith('@@deck.gl')) { ii = i; } else { break; }
+                            }
+                            effectiveBeforeId = styleLayers[ii]?.id;
+                        }
+                        map.addLayer({
+                            id: layerId,
+                            type: 'raster',
+                            source: sourceId
+                        }, effectiveBeforeId);
+                        addedLayers.push({ id: layerId, name: name, type: 'raster' });
+                    }
+                    break;
+                }
+
+                case 'addGeoJSON': {
+                    const layerName = kwargs.name;
+                    const sourceId = layerName + '-source';
+                    if (!map.getSource(sourceId)) {
+                        map.addSource(sourceId, {
+                            type: 'geojson',
+                            data: kwargs.data
+                        });
+                    }
+                    if (!map.getLayer(layerName)) {
+                        const layerType = kwargs.layerType || 'circle';
+                        map.addLayer({
+                            id: layerName,
+                            type: layerType,
+                            source: sourceId,
+                            paint: kwargs.paint || getDefaultPaint(layerType)
+                        });
+                        addedLayers.push({ id: layerName, name: layerName, type: layerType });
+                    }
+                    if (kwargs.fitBounds && kwargs.bounds) {
+                        map.fitBounds([
+                            [kwargs.bounds[0], kwargs.bounds[1]],
+                            [kwargs.bounds[2], kwargs.bounds[3]]
+                        ], { padding: 50 });
+                    }
+                    break;
+                }
+
+                case 'addTileLayer': {
+                    const tileUrl = args[0];
+                    const tileName = kwargs.name;
+                    const tileSourceId = tileName + '-source';
+                    if (!map.getSource(tileSourceId)) {
+                        map.addSource(tileSourceId, {
+                            type: 'raster',
+                            tiles: [tileUrl],
+                            tileSize: 256,
+                            attribution: kwargs.attribution || ''
+                        });
+                    }
+                    if (!map.getLayer(tileName)) {
+                        map.addLayer({
+                            id: tileName,
+                            type: 'raster',
+                            source: tileSourceId
+                        });
+                        addedLayers.push({ id: tileName, name: tileName, type: 'raster' });
+                    }
+                    break;
+                }
+
+                case 'addControl': {
+                    const controlType = args[0];
+                    const position = kwargs.position || 'top-right';
+                    let control;
+                    switch (controlType) {
+                        case 'navigation':
+                            control = new maplibregl.NavigationControl();
+                            break;
+                        case 'scale':
+                            control = new maplibregl.ScaleControl();
+                            break;
+                        case 'fullscreen':
+                            control = new maplibregl.FullscreenControl();
+                            break;
+                        case 'geolocate':
+                            control = new maplibregl.GeolocateControl();
+                            break;
+                        case 'globe':
+                            control = new maplibregl.GlobeControl();
+                            break;
+                        case 'attribution':
+                            control = new maplibregl.AttributionControl({
+                                compact: kwargs.compact !== false
+                            });
+                            break;
+                    }
+                    if (control) {
+                        map.addControl(control, position);
+                    }
+                    break;
+                }
+
+                case 'addLayerControl': {
+                    // Store config for later (after all layers are added)
+                    layerControlConfig = kwargs;
+                    break;
+                }
+
+                case 'addDrawControl': {
+                    // Store config for later (after map is fully loaded)
+                    drawControlConfig = kwargs;
+                    break;
+                }
+
+                case 'addControlGrid': {
+                    // Store config for later (add after layer control)
+                    controlGridConfig = kwargs;
+                    break;
+                }
+
+                case 'addMarker': {
+                    const [lng, lat] = args;
+                    const markerId = kwargs.id || `marker-${Date.now()}`;
+                    const color = kwargs.color || '#3388ff';
+                    const scale = kwargs.scale || 1.0;
+                    const draggable = kwargs.draggable || false;
+                    const marker = new maplibregl.Marker({ color, scale, draggable })
+                        .setLngLat([lng, lat]);
+                    if (kwargs.popup) {
+                        const popupMaxWidth = kwargs.popupMaxWidth || '240px';
+                        marker.setPopup(new maplibregl.Popup({ maxWidth: popupMaxWidth }).setHTML(kwargs.popup));
+                    }
+                    marker.addTo(map);
+                    // Add tooltip on hover if provided
+                    if (kwargs.tooltip) {
+                        const tooltipMaxWidth = kwargs.tooltipMaxWidth || '240px';
+                        const tooltipPopup = new maplibregl.Popup({
+                            closeButton: false,
+                            closeOnClick: false,
+                            maxWidth: tooltipMaxWidth
+                        });
+                        const markerEl = marker.getElement();
+                        markerEl.addEventListener('mouseenter', () => {
+                            tooltipPopup.setLngLat([lng, lat]).setHTML(kwargs.tooltip).addTo(map);
+                        });
+                        markerEl.addEventListener('mouseleave', () => {
+                            tooltipPopup.remove();
+                        });
+                    }
+                    // Track for layer control
+                    markerGroups.set(markerId, [marker]);
+                    markerGroupNames.set(markerId, markerId);
+                    markerGroupVisibility.set(markerId, true);
+                    markerGroupOpacity.set(markerId, 1);
+                    break;
+                }
+
+                case 'addMarkers': {
+                    const markersGroupId = kwargs.id || `markers-${Date.now()}`;
+                    const markers = kwargs.markers || [];
+                    const color = kwargs.color || '#3388ff';
+                    const scale = kwargs.scale || 1.0;
+                    const draggable = kwargs.draggable || false;
+                    const popupMaxWidth = kwargs.popupMaxWidth || '240px';
+                    const tooltipMaxWidth = kwargs.tooltipMaxWidth || '240px';
+                    const groupMarkers = [];
+
+                    for (const m of markers) {
+                        const [lng, lat] = m.lngLat;
+                        const marker = new maplibregl.Marker({ color, scale, draggable })
+                            .setLngLat([lng, lat]);
+                        if (m.popup) {
+                            marker.setPopup(new maplibregl.Popup({ maxWidth: popupMaxWidth }).setHTML(m.popup));
+                        }
+                        marker.addTo(map);
+                        // Add tooltip on hover if provided
+                        if (m.tooltip) {
+                            const tooltipPopup = new maplibregl.Popup({
+                                closeButton: false,
+                                closeOnClick: false,
+                                maxWidth: tooltipMaxWidth
+                            });
+                            const markerEl = marker.getElement();
+                            markerEl.addEventListener('mouseenter', () => {
+                                tooltipPopup.setLngLat([lng, lat]).setHTML(m.tooltip).addTo(map);
+                            });
+                            markerEl.addEventListener('mouseleave', () => {
+                                tooltipPopup.remove();
+                            });
+                        }
+                        groupMarkers.push(marker);
+                    }
+                    // Track for layer control
+                    markerGroups.set(markersGroupId, groupMarkers);
+                    markerGroupNames.set(markersGroupId, markersGroupId);
+                    markerGroupVisibility.set(markersGroupId, true);
+                    markerGroupOpacity.set(markersGroupId, 1);
+                    break;
+                }
+
+                case 'addLegend': {
+                    const legendId = kwargs.id || 'legend';
+                    const title = kwargs.title || 'Legend';
+                    const items = kwargs.items || [];
+                    const position = kwargs.position || 'bottom-right';
+                    const opacity = kwargs.opacity !== undefined ? kwargs.opacity : 1.0;
+
+                    // Create legend container
+                    const legendDiv = document.createElement('div');
+                    legendDiv.id = legendId;
+                    legendDiv.className = 'maplibregl-ctrl legend-control';
+                    legendDiv.style.cssText = `
+                        background: rgba(255, 255, 255, ${opacity});
+                        padding: 10px 14px;
+                        border-radius: 4px;
+                        box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        font-size: 12px;
+                        line-height: 1.4;
+                        max-width: 200px;
+                    `;
+
+                    // Add title
+                    const titleEl = document.createElement('div');
+                    titleEl.style.cssText = 'font-weight: bold; margin-bottom: 8px; font-size: 13px;';
+                    titleEl.textContent = title;
+                    legendDiv.appendChild(titleEl);
+
+                    // Add items
+                    for (const item of items) {
+                        const row = document.createElement('div');
+                        row.style.cssText = 'display: flex; align-items: center; margin-bottom: 4px;';
+
+                        const colorBox = document.createElement('span');
+                        colorBox.style.cssText = `
+                            width: 16px;
+                            height: 16px;
+                            background-color: ${item.color};
+                            margin-right: 8px;
+                            border-radius: 2px;
+                            flex-shrink: 0;
+                        `;
+                        row.appendChild(colorBox);
+
+                        const label = document.createElement('span');
+                        label.textContent = item.label;
+                        row.appendChild(label);
+
+                        legendDiv.appendChild(row);
+                    }
+
+                    // Get the appropriate control container
+                    const positionClass = 'maplibregl-ctrl-' + position;
+                    let container = document.querySelector('.' + positionClass);
+                    if (!container) {
+                        // Create container if it doesn't exist
+                        container = document.createElement('div');
+                        container.className = 'maplibregl-ctrl-' + position.split('-')[0] + ' ' + positionClass;
+                        document.querySelector('.maplibregl-control-container').appendChild(container);
+                    }
+                    // Insert at beginning so legend appears above attribution
+                    container.insertBefore(legendDiv, container.firstChild);
+                    break;
+                }
+
+                case 'addColorbar': {
+                    const cbId = kwargs.colorbarId || 'colorbar-0';
+                    const cbColormap = kwargs.colormap || 'viridis';
+                    const cbVmin = kwargs.vmin !== undefined ? kwargs.vmin : 0;
+                    const cbVmax = kwargs.vmax !== undefined ? kwargs.vmax : 1;
+                    const cbLabel = kwargs.label || '';
+                    const cbUnits = kwargs.units || '';
+                    const cbOrientation = kwargs.orientation || 'horizontal';
+                    const cbPosition = kwargs.position || 'bottom-right';
+                    const cbBarThickness = kwargs.barThickness || 20;
+                    const cbBarLength = kwargs.barLength || 250;
+                    const cbOpacity = kwargs.opacity !== undefined ? kwargs.opacity : 1.0;
+
+                    // Colormap gradients (CSS approximations)
+                    const colormapGradients = {
+                        'viridis': 'linear-gradient(to right, #440154, #482878, #3e4989, #31688e, #26828e, #1f9e89, #35b779, #6ece58, #b5de2b, #fde725)',
+                        'plasma': 'linear-gradient(to right, #0d0887, #46039f, #7201a8, #9c179e, #bd3786, #d8576b, #ed7953, #fb9f3a, #fdca26, #f0f921)',
+                        'inferno': 'linear-gradient(to right, #000004, #1b0c41, #4a0c6b, #781c6d, #a52c60, #cf4446, #ed6925, #fb9b06, #f7d13d, #fcffa4)',
+                        'magma': 'linear-gradient(to right, #000004, #180f3d, #440f76, #721f81, #9e2f7f, #cd4071, #f1605d, #fd9668, #feca8d, #fcfdbf)',
+                        'cividis': 'linear-gradient(to right, #00224e, #123570, #1f4b86, #2c6291, #3c7a91, #4f928c, #65ab7c, #84c267, #abd94f, #fdea45)',
+                        'coolwarm': 'linear-gradient(to right, #3b4cc0, #6788ee, #9abbff, #c9d7ef, #eddad5, #f7a789, #e36c51, #b40426)',
+                        'terrain': 'linear-gradient(to right, #333399, #00b2b2, #00ff00, #cccc00, #cc6600, #993300, #ffffff)',
+                        'jet': 'linear-gradient(to right, #00007f, #0000ff, #007fff, #00ffff, #7fff7f, #ffff00, #ff7f00, #ff0000, #7f0000)',
+                        'turbo': 'linear-gradient(to right, #30123b, #4662d7, #36aaf9, #1ae4b6, #72fe5e, #c8ef34, #faba39, #f66b19, #ca2a04, #7a0403)',
+                        'hot': 'linear-gradient(to right, #000000, #e60000, #ffa500, #ffff00, #ffffff)',
+                        'cool': 'linear-gradient(to right, #00ffff, #ff00ff)',
+                        'gray': 'linear-gradient(to right, #000000, #ffffff)',
+                        'rainbow': 'linear-gradient(to right, #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #8f00ff)',
+                    };
+                    const isVertical = cbOrientation === 'vertical';
+                    const gradientDir = isVertical ? 'to top' : 'to right';
+                    let gradient = (colormapGradients[cbColormap] || colormapGradients['viridis']).replace('to right', gradientDir);
+
+                    // Build colorbar element
+                    const cbDiv = document.createElement('div');
+                    cbDiv.id = cbId;
+                    cbDiv.className = 'maplibregl-ctrl';
+                    cbDiv.style.cssText = `
+                        background: rgba(255, 255, 255, ${cbOpacity});
+                        padding: 8px 12px;
+                        border-radius: 4px;
+                        box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        font-size: 11px;
+                    `;
+
+                    if (cbLabel) {
+                        const labelEl = document.createElement('div');
+                        labelEl.style.cssText = 'font-weight: bold; margin-bottom: 4px; font-size: 12px; text-align: center;';
+                        labelEl.textContent = cbLabel;
+                        cbDiv.appendChild(labelEl);
+                    }
+
+                    const barEl = document.createElement('div');
+                    barEl.style.cssText = isVertical
+                        ? `width: ${cbBarThickness}px; height: ${cbBarLength}px; background: ${gradient}; border: 1px solid #ccc; margin: 0 auto;`
+                        : `width: ${cbBarLength}px; height: ${cbBarThickness}px; background: ${gradient}; border: 1px solid #ccc;`;
+                    cbDiv.appendChild(barEl);
+
+                    // Tick labels
+                    const tickCount = 5;
+                    const ticksDiv = document.createElement('div');
+                    ticksDiv.style.cssText = isVertical
+                        ? `display: flex; flex-direction: column-reverse; justify-content: space-between; height: ${cbBarLength}px; position: absolute; right: -30px; top: 0; font-size: 10px;`
+                        : `display: flex; justify-content: space-between; margin-top: 2px; font-size: 10px;`;
+                    for (let i = 0; i < tickCount; i++) {
+                        const val = cbVmin + (cbVmax - cbVmin) * i / (tickCount - 1);
+                        const tickEl = document.createElement('span');
+                        tickEl.textContent = val.toFixed(val % 1 === 0 ? 0 : 1);
+                        ticksDiv.appendChild(tickEl);
+                    }
+                    if (!isVertical) {
+                        cbDiv.appendChild(ticksDiv);
+                    }
+
+                    if (cbUnits) {
+                        const unitsEl = document.createElement('div');
+                        unitsEl.style.cssText = 'text-align: center; margin-top: 2px; font-size: 10px; color: #666;';
+                        unitsEl.textContent = cbUnits;
+                        cbDiv.appendChild(unitsEl);
+                    }
+
+                    // Add to map control container
+                    const cbPosClass = 'maplibregl-ctrl-' + cbPosition;
+                    let cbContainer = document.querySelector('.' + cbPosClass);
+                    if (!cbContainer) {
+                        cbContainer = document.createElement('div');
+                        cbContainer.className = 'maplibregl-ctrl-' + cbPosition.split('-')[0] + ' ' + cbPosClass;
+                        document.querySelector('.maplibregl-control-container').appendChild(cbContainer);
+                    }
+                    cbContainer.insertBefore(cbDiv, cbContainer.firstChild);
+                    break;
+                }
+
+                case 'flyTo': {
+                    map.flyTo({
+                        center: [args[0], args[1]],
+                        zoom: kwargs.zoom,
+                        duration: kwargs.duration || 2000
+                    });
+                    break;
+                }
+
+                case 'fitBounds': {
+                    const bounds = args[0];
+                    map.fitBounds([
+                        [bounds[0], bounds[1]],
+                        [bounds[2], bounds[3]]
+                    ], {
+                        padding: kwargs.padding || 50,
+                        duration: kwargs.duration || 1000
+                    });
+                    break;
+                }
+
+                case 'setVisibility': {
+                    const [layerId, visible] = args;
+                    if (map.getLayer(layerId)) {
+                        map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
+                    }
+                    if (deckLayers.has(layerId)) {
+                        setCOGVisibility(layerId, visible);
+                    }
+                    break;
+                }
+
+                case 'setOpacity': {
+                    const [layerId, opacity] = args;
+                    if (map.getLayer(layerId)) {
+                        const layer = map.getLayer(layerId);
+                        const opacityProp = getOpacityProperty(layer.type);
+                        if (opacityProp) {
+                            map.setPaintProperty(layerId, opacityProp, opacity);
+                        }
+                    }
+                    if (deckLayers.has(layerId)) {
+                        setCOGOpacity(layerId, opacity);
+                    }
+                    break;
+                }
+
+                case 'addPMTilesLayer': {
+                    const url = kwargs.url;
+                    const layerId = kwargs.id;
+                    const sourceType = kwargs.sourceType || 'vector';
+                    const opacity = kwargs.opacity || 1.0;
+                    const visible = kwargs.visible !== false;
+                    const style = kwargs.style || {};
+
+                    // Prepare PMTiles URL with protocol
+                    const pmtilesUrl = url.startsWith('pmtiles://') ? url : `pmtiles://${url}`;
+
+                    // Add source
+                    const sourceId = `${layerId}-source`;
+                    if (!map.getSource(sourceId)) {
+                        map.addSource(sourceId, {
+                            type: sourceType,
+                            url: pmtilesUrl
+                        });
+                    }
+
+                    // Add layer(s)
+                    if (!map.getLayer(layerId)) {
+                        if (sourceType === 'vector') {
+                            // For vector PMTiles, we might need to add multiple layers
+                            // Use provided style or create default
+                            const layerStyle = {
+                                id: layerId,
+                                source: sourceId,
+                                type: 'fill',
+                                layout: {
+                                    visibility: visible ? 'visible' : 'none'
+                                },
+                                paint: {
+                                    'fill-opacity': opacity,
+                                    'fill-color': '#3388ff',
+                                    ...style
+                                }
+                            };
+
+                            if (style.type) {
+                                layerStyle.type = style.type;
+                                if (style.type === 'line') {
+                                    layerStyle.paint = {
+                                        'line-opacity': opacity,
+                                        'line-color': '#3388ff',
+                                        'line-width': 2,
+                                        ...style
+                                    };
+                                } else if (style.type === 'circle') {
+                                    layerStyle.paint = {
+                                        'circle-opacity': opacity,
+                                        'circle-color': '#3388ff',
+                                        'circle-radius': 5,
+                                        ...style
+                                    };
+                                }
+                            }
+
+                            if (style['source-layer']) {
+                                layerStyle['source-layer'] = style['source-layer'];
+                            }
+
+                            map.addLayer(layerStyle);
+                        } else {
+                            // For raster PMTiles
+                            map.addLayer({
+                                id: layerId,
+                                type: 'raster',
+                                source: sourceId,
+                                layout: {
+                                    visibility: visible ? 'visible' : 'none'
+                                },
+                                paint: {
+                                    'raster-opacity': opacity
+                                }
+                            });
+                        }
+
+                        addedLayers.push({
+                            id: layerId,
+                            name: kwargs.name || layerId,
+                            type: sourceType === 'vector' ? (style.type || 'fill') : 'raster'
+                        });
+                    }
+
+                    // Fit bounds if requested
+                    if (kwargs.fitBounds) {
+                        // For PMTiles, we could try to get metadata and fit to bounds
+                        // This is optional and complex, so we'll skip for now
+                    }
+
+                    break;
+                }
+
+                case 'removePMTilesLayer': {
+                    const layerId = args[0];
+                    if (map.getLayer(layerId)) {
+                        map.removeLayer(layerId);
+                    }
+                    const sourceId = `${layerId}-source`;
+                    if (map.getSource(sourceId)) {
+                        map.removeSource(sourceId);
+                    }
+                    // Remove from addedLayers
+                    const index = addedLayers.findIndex(l => l.id === layerId);
+                    if (index > -1) {
+                        addedLayers.splice(index, 1);
+                    }
+                    break;
+                }
+
+                case 'setSky': {
+                    const skySpec = {};
+                    if (kwargs.skyColor !== undefined) skySpec['sky-color'] = kwargs.skyColor;
+                    if (kwargs.skyHorizonBlend !== undefined) skySpec['sky-horizon-blend'] = kwargs.skyHorizonBlend;
+                    if (kwargs.horizonColor !== undefined) skySpec['horizon-color'] = kwargs.horizonColor;
+                    if (kwargs.horizonFogBlend !== undefined) skySpec['horizon-fog-blend'] = kwargs.horizonFogBlend;
+                    if (kwargs.fogColor !== undefined) skySpec['fog-color'] = kwargs.fogColor;
+                    if (kwargs.fogGroundBlend !== undefined) skySpec['fog-ground-blend'] = kwargs.fogGroundBlend;
+                    if (kwargs.atmosphereBlend !== undefined) skySpec['atmosphere-blend'] = kwargs.atmosphereBlend;
+                    map.setSky(skySpec);
+                    break;
+                }
+
+                case 'removeSky': {
+                    map.setSky(undefined);
+                    break;
+                }
+
+                case 'addTerrain': {
+                    const terrainSource = kwargs.source;
+                    const terrainExaggeration = kwargs.exaggeration || 1.0;
+                    const terrainSourceId = 'terrain-dem';
+                    if (!map.getSource(terrainSourceId)) {
+                        map.addSource(terrainSourceId, {
+                            type: 'raster-dem',
+                            tiles: [terrainSource.url],
+                            tileSize: 256,
+                            encoding: terrainSource.encoding === 'mapbox' ? 'mapbox' : 'terrarium'
+                        });
+                    }
+                    map.setTerrain({
+                        source: terrainSourceId,
+                        exaggeration: terrainExaggeration
+                    });
+                    break;
+                }
+
+                case 'addImageLayer': {
+                    const imgId = kwargs.id || 'image-' + Date.now();
+                    const imgSourceId = imgId + '-source';
+                    const imgUrl = kwargs.url;
+                    const imgCoords = kwargs.coordinates;
+                    const imgOpacity = kwargs.opacity !== undefined ? kwargs.opacity : 1.0;
+                    if (imgUrl && imgCoords && imgCoords.length === 4) {
+                        if (!map.getSource(imgSourceId)) {
+                            map.addSource(imgSourceId, {
+                                type: 'image',
+                                url: imgUrl,
+                                coordinates: imgCoords
+                            });
+                        }
+                        if (!map.getLayer(imgId)) {
+                            map.addLayer({
+                                id: imgId,
+                                type: 'raster',
+                                source: imgSourceId,
+                                paint: { 'raster-opacity': imgOpacity }
+                            });
+                            addedLayers.push({ id: imgId, name: imgId, type: 'raster' });
+                        }
+                    }
+                    break;
+                }
+
+                case 'setFilter': {
+                    const filterLayerId = kwargs.layerId;
+                    const filterExpr = kwargs.filter || null;
+                    if (filterLayerId && map.getLayer(filterLayerId)) {
+                        map.setFilter(filterLayerId, filterExpr);
+                    }
+                    break;
+                }
+
+                case 'addVideoLayer': {
+                    const vidId = kwargs.id || 'video-' + Date.now();
+                    const vidSourceId = vidId + '-source';
+                    const vidUrls = kwargs.urls;
+                    const vidCoords = kwargs.coordinates;
+                    const vidOpacity = kwargs.opacity !== undefined ? kwargs.opacity : 1.0;
+                    if (vidUrls && vidCoords && vidCoords.length === 4) {
+                        if (!map.getSource(vidSourceId)) {
+                            map.addSource(vidSourceId, {
+                                type: 'video',
+                                urls: vidUrls,
+                                coordinates: vidCoords
+                            });
+                        }
+                        if (!map.getLayer(vidId)) {
+                            map.addLayer({
+                                id: vidId,
+                                type: 'raster',
+                                source: vidSourceId,
+                                paint: { 'raster-opacity': vidOpacity }
+                            });
+                            addedLayers.push({ id: vidId, name: vidId, type: 'raster' });
+                        }
+                    }
+                    break;
+                }
+
+                case 'playVideo': {
+                    const playSourceId = (kwargs.id || '') + '-source';
+                    const playSource = map.getSource(playSourceId);
+                    if (playSource && playSource.play) playSource.play();
+                    break;
+                }
+
+                case 'pauseVideo': {
+                    const pauseSourceId = (kwargs.id || '') + '-source';
+                    const pauseSource = map.getSource(pauseSourceId);
+                    if (pauseSource && pauseSource.pause) pauseSource.pause();
+                    break;
+                }
+
+                case 'addSplitMap': {
+                    const leftLayer = kwargs.leftLayer;
+                    const rightLayer = kwargs.rightLayer;
+                    const splitPos = kwargs.position || 50;
+                    if (!leftLayer || !rightLayer) break;
+
+                    // Hide right layer on primary map
+                    if (map.getLayer(rightLayer)) {
+                        map.setLayoutProperty(rightLayer, 'visibility', 'none');
+                    }
+
+                    // Create overlay container
+                    const mapEl = document.getElementById('map');
+                    const rightContainer = document.createElement('div');
+                    rightContainer.id = 'split-map-right';
+                    rightContainer.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;clip-path:inset(0 0 0 ' + splitPos + '%);pointer-events:none;';
+                    mapEl.appendChild(rightContainer);
+
+                    // Create right map
+                    const rightMap = new maplibregl.Map({
+                        container: rightContainer,
+                        style: state.style,
+                        center: map.getCenter(),
+                        zoom: map.getZoom(),
+                        bearing: map.getBearing(),
+                        pitch: map.getPitch(),
+                        interactive: false,
+                        attributionControl: false
+                    });
+
+                    rightMap.on('load', function() {
+                        // Replay layer-adding calls directly on rightMap
+                        for (const call of (state.js_calls || [])) {
+                            try {
+                                const k = call.kwargs || {};
+                                if (call.method === 'addTileLayer') {
+                                    const tileUrl = call.args[0];
+                                    const tileName = k.name;
+                                    const tileSourceId = tileName + '-source';
+                                    if (!rightMap.getSource(tileSourceId)) {
+                                        rightMap.addSource(tileSourceId, {
+                                            type: 'raster',
+                                            tiles: [tileUrl],
+                                            tileSize: 256,
+                                            attribution: k.attribution || ''
+                                        });
+                                    }
+                                    if (!rightMap.getLayer(tileName)) {
+                                        rightMap.addLayer({
+                                            id: tileName,
+                                            type: 'raster',
+                                            source: tileSourceId
+                                        });
+                                    }
+                                } else if (call.method === 'addBasemap') {
+                                    const bmUrl = call.args[0];
+                                    const bmName = k.name || 'basemap';
+                                    const bmSourceId = 'basemap-' + bmName;
+                                    const bmLayerId = bmName;
+                                    if (!rightMap.getSource(bmSourceId)) {
+                                        rightMap.addSource(bmSourceId, {
+                                            type: 'raster',
+                                            tiles: [bmUrl],
+                                            tileSize: 256,
+                                            attribution: k.attribution || ''
+                                        });
+                                    }
+                                    if (!rightMap.getLayer(bmLayerId)) {
+                                        rightMap.addLayer({
+                                            id: bmLayerId,
+                                            type: 'raster',
+                                            source: bmSourceId
+                                        });
+                                    }
+                                } else if (call.method === 'addGeoJSON') {
+                                    const gjName = k.name;
+                                    const gjSourceId = gjName + '-source';
+                                    if (!rightMap.getSource(gjSourceId)) {
+                                        rightMap.addSource(gjSourceId, {
+                                            type: 'geojson',
+                                            data: k.data
+                                        });
+                                    }
+                                    if (!rightMap.getLayer(gjName)) {
+                                        const gjType = k.layerType || 'circle';
+                                        rightMap.addLayer({
+                                            id: gjName,
+                                            type: gjType,
+                                            source: gjSourceId,
+                                            paint: k.paint || getDefaultPaint(gjType)
+                                        });
+                                    }
+                                } else if (call.method === 'addImageLayer') {
+                                    const iiId = k.id || 'image-' + Date.now();
+                                    const iiSourceId = iiId + '-source';
+                                    if (k.url && k.coordinates && k.coordinates.length === 4) {
+                                        if (!rightMap.getSource(iiSourceId)) {
+                                            rightMap.addSource(iiSourceId, {
+                                                type: 'image',
+                                                url: k.url,
+                                                coordinates: k.coordinates
+                                            });
+                                        }
+                                        if (!rightMap.getLayer(iiId)) {
+                                            rightMap.addLayer({
+                                                id: iiId,
+                                                type: 'raster',
+                                                source: iiSourceId,
+                                                paint: { 'raster-opacity': k.opacity !== undefined ? k.opacity : 1.0 }
+                                            });
+                                        }
+                                    }
+                                } else if (call.method === 'addVideoLayer') {
+                                    const vvId = k.id || 'video-' + Date.now();
+                                    const vvSourceId = vvId + '-source';
+                                    if (k.urls && k.coordinates && k.coordinates.length === 4) {
+                                        if (!rightMap.getSource(vvSourceId)) {
+                                            rightMap.addSource(vvSourceId, {
+                                                type: 'video',
+                                                urls: k.urls,
+                                                coordinates: k.coordinates
+                                            });
+                                        }
+                                        if (!rightMap.getLayer(vvId)) {
+                                            rightMap.addLayer({
+                                                id: vvId,
+                                                type: 'raster',
+                                                source: vvSourceId,
+                                                paint: { 'raster-opacity': k.opacity !== undefined ? k.opacity : 1.0 }
+                                            });
+                                        }
+                                    }
+                                }
+                            } catch(e) { /* skip failures */ }
+                        }
+                        // Show only the right layer, hide everything else
+                        try {
+                            const allRightLayers = rightMap.getStyle().layers || [];
+                            for (const l of allRightLayers) {
+                                if (l.id === rightLayer) {
+                                    rightMap.setLayoutProperty(l.id, 'visibility', 'visible');
+                                } else {
+                                    try { rightMap.setLayoutProperty(l.id, 'visibility', 'none'); } catch(e) {}
+                                }
+                            }
+                        } catch(e) {}
+                    });
+
+                    // Sync camera
+                    map.on('move', function() {
+                        rightMap.jumpTo({
+                            center: map.getCenter(),
+                            zoom: map.getZoom(),
+                            bearing: map.getBearing(),
+                            pitch: map.getPitch()
+                        });
+                    });
+
+                    // Create slider
+                    const splitSlider = document.createElement('div');
+                    splitSlider.style.cssText = 'position:absolute;top:0;left:' + splitPos + '%;width:4px;height:100%;background:#333;cursor:ew-resize;z-index:10;box-shadow:-1px 0 0 rgba(255,255,255,0.6),1px 0 0 rgba(255,255,255,0.6),0 0 6px rgba(0,0,0,0.5);';
+                    const splitHandle = document.createElement('div');
+                    splitHandle.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:36px;height:36px;border-radius:50%;background:#fff;border:2px solid #333;box-shadow:0 1px 6px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;font-size:16px;color:#333;font-weight:bold;';
+                    splitHandle.innerHTML = '&#x2194;';
+                    splitSlider.appendChild(splitHandle);
+                    mapEl.appendChild(splitSlider);
+
+                    let splitDragging = false;
+                    splitSlider.addEventListener('pointerdown', function(e) {
+                        splitDragging = true;
+                        splitSlider.setPointerCapture(e.pointerId);
+                        e.preventDefault();
+                    });
+                    window.addEventListener('pointermove', function(e) {
+                        if (!splitDragging) return;
+                        const rect = mapEl.getBoundingClientRect();
+                        const x = e.clientX - rect.left;
+                        const pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
+                        splitSlider.style.left = pct + '%';
+                        rightContainer.style.clipPath = 'inset(0 0 0 ' + pct + '%)';
+                    });
+                    window.addEventListener('pointerup', function() { splitDragging = false; });
+                    break;
+                }
+
+                case 'addCOGLayer': {
+                    await ensureDeckGL();
+                    initDeckOverlay();
+
+                    const cogId = kwargs.id || 'cog-' + Date.now();
+                    const geotiff = kwargs.geotiff;
+                    const cogFitBounds = kwargs.fitBounds !== false;
+                    const cogOpacity = kwargs.opacity !== undefined ? kwargs.opacity : 1;
+                    // Use COGLayerWithOpacity to ensure opacity changes propagate to sublayers
+                    const cogLayer = new COGLayerWithOpacity({
+                        id: cogId,
+                        geotiff,
+                        opacity: cogOpacity,
+                        visible: kwargs.visible !== false,
+                        debug: kwargs.debug || false,
+                        debugOpacity: kwargs.debugOpacity !== undefined ? kwargs.debugOpacity : 0.25,
+                        maxError: kwargs.maxError !== undefined ? kwargs.maxError : 0.125,
+                        geoKeysParser,
+                        onGeoTIFFLoad: (tiff, options) => {
+                            if (cogFitBounds) {
+                                const { west, south, east, north } = options.geographicBounds;
+                                map.fitBounds([[west, south], [east, north]], { padding: 40, duration: 1000 });
+                            }
+                        },
+                    });
+                    deckLayers.set(cogId, cogLayer);
+                    cogLayerNames.set(cogId, kwargs.name || cogId);
+                    updateDeckOverlay();
+
+                    // Notify adapter so layer control picks up the new layer
+                    cogChangeCallbacks.forEach(cb => cb('add', cogId));
+
+                    // If layer control already exists, dynamically register the adapter
+                    if (layerControlInstance && typeof layerControlInstance.registerCustomAdapter === 'function') {
+                        layerControlInstance.registerCustomAdapter(cogLayerAdapter);
+                    }
+                    break;
+                }
+
+                case 'removeCOGLayer': {
+                    const removeCogId = args[0];
+                    deckLayers.delete(removeCogId);
+                    cogLayerNames.delete(removeCogId);
+                    updateDeckOverlay();
+                    cogChangeCallbacks.forEach(cb => cb('remove', removeCogId));
+                    break;
+                }
+
+                default:
+                    console.log('Unknown method:', method);
+            }
+        }
+
+        function getDefaultPaint(layerType) {
+            const defaults = {
+                circle: {
+                    'circle-radius': 5,
+                    'circle-color': '#3388ff',
+                    'circle-opacity': 0.8,
+                    'circle-stroke-width': 1,
+                    'circle-stroke-color': '#ffffff'
+                },
+                line: {
+                    'line-color': '#3388ff',
+                    'line-width': 2,
+                    'line-opacity': 0.8
+                },
+                fill: {
+                    'fill-color': '#3388ff',
+                    'fill-opacity': 0.5,
+                    'fill-outline-color': '#0000ff'
+                },
+                raster: {
+                    'raster-opacity': 1
+                }
+            };
+            return defaults[layerType] || {};
+        }
+
+        function getOpacityProperty(layerType) {
+            const opacityMap = {
+                fill: 'fill-opacity',
+                line: 'line-opacity',
+                circle: 'circle-opacity',
+                symbol: 'icon-opacity',
+                raster: 'raster-opacity',
+                'fill-extrusion': 'fill-extrusion-opacity'
+            };
+            return opacityMap[layerType];
+        }
+
+        let layerControlInstance = null;
+        let layerControlOrderSyncTimer = null;
+
+        function reorderDeckLayersFromLayerControl(layerOrder) {
+            if (deckLayers.size <= 1) return;
+
+            const currentLayers = new Map(deckLayers);
+            const orderedDeckIds = layerOrder.filter(layerId => currentLayers.has(layerId));
+            const seen = new Set();
+            const reorderedEntries = [];
+
+            for (const layerId of orderedDeckIds) {
+                if (!currentLayers.has(layerId) || seen.has(layerId)) continue;
+                reorderedEntries.push([layerId, currentLayers.get(layerId)]);
+                seen.add(layerId);
+            }
+
+            for (const [layerId, layer] of currentLayers) {
+                if (seen.has(layerId)) continue;
+                reorderedEntries.push([layerId, layer]);
+            }
+
+            deckLayers.clear();
+            for (const [layerId, layer] of reorderedEntries) {
+                deckLayers.set(layerId, layer);
+            }
+        }
+
+        function getSentinelBeforeIdForLayerControlOrder(layerOrder) {
+            let lastDeckIndex = -1;
+            for (let i = 0; i < layerOrder.length; i++) {
+                if (deckLayers.has(layerOrder[i])) {
+                    lastDeckIndex = i;
+                }
+            }
+
+            if (lastDeckIndex < 0) {
+                return undefined;
+            }
+
+            for (let i = lastDeckIndex + 1; i < layerOrder.length; i++) {
+                const layerId = layerOrder[i];
+                if (layerId !== DECK_SENTINEL_ID && map.getLayer(layerId)) {
+                    return layerId;
+                }
+            }
+
+            return undefined;
+        }
+
+        function handleLayerControlReorder(layerOrder) {
+            if (deckLayers.size === 0) return;
+
+            reorderDeckLayersFromLayerControl(layerOrder);
+
+            if (!map.getLayer(DECK_SENTINEL_ID)) {
+                updateDeckOverlay(true);
+                return;
+            }
+
+            const sentinelBeforeId = getSentinelBeforeIdForLayerControlOrder(layerOrder);
+
+            try {
+                map.moveLayer(DECK_SENTINEL_ID, sentinelBeforeId);
+            } catch (_err) {
+                // Ignore unsupported move failures from custom/non-style layers.
+            }
+
+            updateDeckOverlay(true);
+        }
+
+        function getLayerControlOrder() {
+            const styleLayers = map.getStyle()?.layers || [];
+            const deckLayerIds = Array.from(deckLayers.keys());
+            if (styleLayers.length === 0) {
+                return deckLayerIds;
+            }
+
+            const orderedLayerIds = [];
+            let insertedDeckLayers = false;
+
+            for (const layer of styleLayers) {
+                if (layer.id === DECK_SENTINEL_ID) {
+                    if (!insertedDeckLayers) {
+                        orderedLayerIds.push(...deckLayerIds);
+                        insertedDeckLayers = true;
+                    }
+                    continue;
+                }
+                orderedLayerIds.push(layer.id);
+            }
+
+            if (!insertedDeckLayers) {
+                orderedLayerIds.push(...deckLayerIds);
+            }
+
+            return orderedLayerIds;
+        }
+
+        function syncLayerControlOrder() {
+            if (!layerControlInstance) return;
+
+            const layerStates = layerControlInstance.state && layerControlInstance.state.layerStates;
+            if (!layerStates || typeof layerControlInstance.buildLayerItems !== 'function') {
+                return;
+            }
+
+            const desiredOrder = getLayerControlOrder();
+            if (desiredOrder.length === 0) {
+                return;
+            }
+
+            const currentOrder = Object.keys(layerStates);
+            const hasBackground = currentOrder.includes('Background');
+            const currentLayerIds = currentOrder.filter(layerId => layerId !== 'Background');
+            const currentSet = new Set(currentLayerIds);
+            const desiredSet = new Set(desiredOrder);
+            const reorderedIds = [
+                ...desiredOrder.filter(layerId => currentSet.has(layerId)),
+                ...currentLayerIds.filter(layerId => !desiredSet.has(layerId)),
+            ];
+
+            if (reorderedIds.length === 0) {
+                return;
+            }
+
+            const isSameOrder = reorderedIds.length === currentLayerIds.length
+                && reorderedIds.every((layerId, index) => layerId === currentLayerIds[index]);
+            if (isSameOrder) {
+                return;
+            }
+
+            const reorderedStates = {};
+            if (hasBackground && Object.prototype.hasOwnProperty.call(layerStates, 'Background')) {
+                reorderedStates.Background = layerStates.Background;
+            }
+            reorderedIds.forEach((layerId) => {
+                reorderedStates[layerId] = layerStates[layerId];
+            });
+
+            layerControlInstance.state.layerStates = reorderedStates;
+            layerControlInstance.targetLayers = hasBackground
+                ? ['Background', ...reorderedIds]
+                : [...reorderedIds];
+            layerControlInstance.buildLayerItems();
+        }
+
+        function scheduleLayerControlOrderSync() {
+            if (!layerControlInstance) return;
+            if (layerControlOrderSyncTimer !== null) {
+                window.clearTimeout(layerControlOrderSyncTimer);
+            }
+            layerControlOrderSyncTimer = window.setTimeout(() => {
+                syncLayerControlOrder();
+                layerControlOrderSyncTimer = null;
+            }, 150);
+        }
+
+        function createLayerControl(config) {
+            const position = config.position || 'top-right';
+            const collapsed = config.collapsed !== false;
+
+            // Build layer IDs from addedLayers (excludes COG layers managed by adapter)
+            const layerIds = addedLayers.map(layer => layer.id);
+
+            // Include custom adapters for non-native layer types
+            const customAdapters = [];
+            if (deckLayers.size > 0) customAdapters.push(cogLayerAdapter);
+            if (markerGroups.size > 0) customAdapters.push(markerLayerAdapter);
+
+            layerControlInstance = new LayerControl({
+                collapsed: collapsed,
+                layers: layerIds,
+                customLayerAdapters: customAdapters.length > 0 ? customAdapters : undefined,
+                onLayerReorder: handleLayerControlReorder,
+            });
+            map.addControl(layerControlInstance, position);
+            syncLayerControlOrder();
+            scheduleLayerControlOrderSync();
+        }
+
+        function createDrawControl(config) {
+            // Check if Geoman is available (UMD exports to Geoman.Geoman)
+            const GeomanClass = (typeof Geoman !== 'undefined' && Geoman.Geoman)
+                ? Geoman.Geoman
+                : (typeof window !== 'undefined' && window.Geoman && window.Geoman.Geoman)
+                    ? window.Geoman.Geoman
+                    : null;
+
+            if (!GeomanClass) {
+                console.warn('Geoman library not loaded. Draw control not available.');
+                return;
+            }
+
+            const position = config.position || 'top-right';
+
+            // Initialize Geoman
+            const geoman = new GeomanClass(map, {
+                position: position
+            });
+
+            map.on('gm:loaded', () => {
+                console.log('Geoman draw control loaded');
+            });
+        }
+    </script>
+</body>
+</html>

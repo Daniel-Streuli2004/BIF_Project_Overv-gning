@@ -61,9 +61,9 @@ simulation:
   total_people: 50
 
   # Stadium map definition
-  stadium:
-    center_lat: 55.6479
-    center_lon: 12.0417
+  stadium: 
+    center_lat: 55.648178388030644
+    center_lon: 12.41841765058267
     boundary_radius_m: 220
 
     # Entry points (used in Phase 1 notebook via simulation.locations fallback-compatible mapping)
