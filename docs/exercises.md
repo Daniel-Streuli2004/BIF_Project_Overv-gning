@@ -69,6 +69,7 @@ Create `notebooks/dashboard.ipynb` as a visualization-only notebook.
 
 In this phase, you focus on dashboard behavior only:
 - Use `anymap-ts` (`from anymap_ts import Map`) for live map rendering.
+- Optionally add a dashboard button that starts `agent_camera` -> `agent_control` -> `agent_people` in this order.
 - Subscribe to:
     - `simulated-city/stadium/person/state`
     - `simulated-city/stadium/camera/decision`

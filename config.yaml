@@ -7,14 +7,14 @@ mqtt:
   # Configure which brokers to use.
   # 
   # For multiple brokers (current):
-  #   active_profiles: [local, mqtthq]
+  #   active_profiles: [mqtthq, local]
   # 
   # For a single broker only:
   #   active_profiles: [local]
   # 
 
   # The first profile in the list is the primary (default) broker.
-  active_profiles: [local, hivemq_cloud]
+  active_profiles: [local]
 
   # Broker profiles.
   # Profile values override any common mqtt.* settings below.
@@ -60,6 +60,11 @@ simulation:
   seed: 42
   total_people: 50
 
+  # People spawn settings
+  spawn:
+    lat: 55.64750000000000
+    lon: 12.41750000000000
+
   # Stadium map definition
   stadium:
     center_lat: 55.65000000000000
@@ -69,40 +74,40 @@ simulation:
     # Entry points (used in Phase 1 notebook via simulation.locations fallback-compatible mapping)
     entries:
       - entry_id: E1
-        lat: 55.64970000000000
+        lat: 55.64840000000000
         lon: 12.41770000000000
       - entry_id: E2
-        lat: 55.65100000000000
-        lon: 12.41780000000000
-      - entry_id: E3
-        lat: 55.65100000000000
+        lat: 55.64820000000000
         lon: 12.41950000000000
+      - entry_id: E3
+        lat: 55.64960000000000
+        lon: 12.41970000000000
       - entry_id: E4
         lat: 55.64970000000000
-        lon: 12.41950000000000
+        lon: 12.41780000000000
 
     # Gate crossing geometry for "inside stadium" decisions
     entry_gate_lines:
       - entry_id: E1
-        lat1: 55.64972000000000
+        lat1: 55.64842000000000
         lon1: 12.41765000000000
-        lat2: 55.64968000000000
+        lat2: 55.64838000000000
         lon2: 12.41775000000000
       - entry_id: E2
-        lat1: 55.65102000000000
-        lon1: 12.41775000000000
-        lat2: 55.65098000000000
-        lon2: 12.41785000000000
-      - entry_id: E3
-        lat1: 55.65102000000000
+        lat1: 55.64822000000000
         lon1: 12.41945000000000
-        lat2: 55.65098000000000
+        lat2: 55.64818000000000
         lon2: 12.41955000000000
+      - entry_id: E3
+        lat1: 55.64962000000000
+        lon1: 12.41965000000000
+        lat2: 55.64958000000000
+        lon2: 12.41975000000000
       - entry_id: E4
         lat1: 55.64972000000000
-        lon1: 12.41945000000000
+        lon1: 12.41775000000000
         lat2: 55.64968000000000
-        lon2: 12.41955000000000
+        lon2: 12.41785000000000
     gate_crossing_tolerance_m: 1.5
 
     # Exit targets for denied people
@@ -123,23 +128,23 @@ simulation:
   # Backward-compatible location list for existing SimulationConfig parser and Phase 1 notebook
   locations:
     - id: E1
-      lat: 55.64970000000000
+      lat: 55.64840000000000
       lon: 12.41770000000000
     - id: E2
-      lat: 55.65100000000000
-      lon: 12.41780000000000
-    - id: E3
-      lat: 55.65100000000000
+      lat: 55.64820000000000
       lon: 12.41950000000000
+    - id: E3
+      lat: 55.64960000000000
+      lon: 12.41970000000000
     - id: E4
       lat: 55.64970000000000
-      lon: 12.41950000000000
+      lon: 12.41780000000000
 
   # Movement and routing
   motion:
-    min_speed_mps: 0.8
-    max_speed_mps: 1.8
-    step_noise_m: 0.5
+    min_speed_kmh: 4.8
+    max_speed_kmh: 6.2
+    step_noise_m: 0.35
   routing:
     tie_break_rule: lowest_entry_id
     retarget_interval_s: 5.0
@@ -156,7 +161,8 @@ simulation:
 
   # Timing controls
   timing:
-    tick_interval_s: 1.0
+    tick_interval_s: 0.5
+    spawn_interval_s: 2.0
     person_state_publish_interval_s: 1.0
     occupancy_publish_interval_s: 2.0
     command_timeout_s: 5.0
@@ -166,7 +172,7 @@ simulation:
 # EXAMPLE: To use multiple MQTT brokers simultaneously, uncomment and edit above.
 # Replace the single "profile: local" line with:
 #
-#   active_profiles: [local, mqtthq]
+#   active_profiles: [mqtthq, local]
 #
 # Then in your code, access both brokers:
 #   config = load_config()

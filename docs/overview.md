@@ -1,50 +1,52 @@
-# Simulated City (Workshop Template)
+# Simulated City Workshop Overview
 
-This template is for a workshop where students learn **agent-based programming in Python** by building pieces of a simple "simulated city"—a lightweight starting point for an **urban digital twin**.
+This repository provides a beginner-friendly, notebook-first template for a distributed city simulation using MQTT.
 
-The goal is to keep the code:
+## Phase 6 architecture
 
-- Small enough to read in one sitting
-- Modular enough to extend (agents, places, sensors, movement rules)
-- Practical for notebook-driven exploration
+The project uses one notebook per agent:
 
+- `notebooks/agent_people.ipynb`
+  - Simulates people movement and state changes.
+  - Publishes person state and entry/exit events.
+- `notebooks/agent_camera.ipynb`
+  - Subscribes to person state.
+  - Publishes allow/deny decisions.
+- `notebooks/agent_control.ipynb`
+  - Subscribes to camera decisions and entry/exit events.
+  - Publishes control commands with TTL metadata and latest-command-wins sequencing.
+  - Publishes occupancy updates.
+- `notebooks/dashboard.ipynb`
+  - Subscribes to simulation topics and renders the live map with `anymap-ts`.
 
+This separation avoids monolithic notebooks and allows each agent to restart independently.
 
-## Repo overview
+## Shared Python helpers
 
-- `src/simulated_city/`: the library students import
-- `notebooks/`: workshop notebooks
-  - `01_maps_and_coordinates.ipynb` — Maps and coordinate system transforms
-  - `02_mqtt_intro/` — MQTT publisher and subscriber examples with multi-broker support
-- `docs/`: workshop handouts and exercises
-- `tests/`: small sanity checks
+Reusable helpers are placed in `src/simulated_city/`:
 
-## Library modules
+- `config.py`: loads YAML + environment settings.
+- `mqtt.py`: MQTT connection and checked publish helpers.
+- `agent_rules.py`: shared routing/reliability logic:
+  - nearest-point routing helper
+  - gate crossing with tolerance check
+  - permanent-exit rule helper
+  - latest-command-wins command store
+  - retry interval helper
 
-- `simulated_city.config`: load settings from `config.yaml` + optional `.env`
-- `simulated_city.mqtt`: build topics, connect, and publish MQTT messages
-- `simulated_city.geo` (optional): CRS transforms for real-world coordinates
-  - Enable with: `python -m pip install -e ".[geo]"`
-  - Includes beginner-friendly helpers like `wgs2utm(...)` / `utm2wgs(...)`
+## Reliability behavior in Phase 6
 
+- Command publishing uses QoS `0` with retry interval handling.
+- Commands carry TTL/expiry metadata.
+- Latest command wins per person using monotonically increasing sequence numbers.
+- Occupancy is derived from gate events (`entered`, `exited`) and published as state updates.
 
-## Docs index
+## Submission reminder
 
-Module docs:
+Include this line in your PR description:
 
-- `docs/config.md` — `simulated_city.config`
-- `docs/mqtt.md` — `simulated_city.mqtt`
-- `docs/geo.md` — `simulated_city.geo` (optional)
-- `docs/__init__.md` — top-level package API (`simulated_city`)
-- `docs/__main__.md` — CLI smoke (`python -m simulated_city`)
+```text
+Docs updated: yes/no
+```
 
-Developer docs:
-
-- `docs/testing.md` — test suite overview and how to run tests
-
-Workshop docs:
-
-- `docs/setup.md` — environment setup + optional extras
-- `docs/demos.md` — script demos (same ideas as the notebook)
-- `docs/maplibre_anymap.md` — mapping in notebooks (anymap-ts / MapLibre)
-- `docs/exercises.md` — student exercises (build the simulation)
+If `yes`, list updated doc files. If `no`, provide one sentence explaining why no docs changed.

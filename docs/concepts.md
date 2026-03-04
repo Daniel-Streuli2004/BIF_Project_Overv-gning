@@ -50,7 +50,7 @@ QoS `0` command handling policy: commands are best-effort, re-published every `c
 	- `lon` (number)
 	- `state` (string: `approaching_entry|inside|exiting`)
 	- `color` (string: `white|green|red`)
-	- `speed_mps` (number)
+	- `speed_kmh` (number)
 	- `target_entry_id` (string)
 
 ### Topic: `simulated-city/stadium/camera/decision`
@@ -127,8 +127,8 @@ Suggested keys for `config.yaml` with realistic defaults:
 ### Thresholds and limits
 - `simulation.population.total_people`: `50`
 - `simulation.population.max_inside`: `50000`
-- `simulation.motion.min_speed_mps`: `0.8`
-- `simulation.motion.max_speed_mps`: `1.8`
+- `simulation.motion.min_speed_kmh`: `5.0`
+- `simulation.motion.max_speed_kmh`: `6.0`
 - `simulation.motion.step_noise_m`: `0.5`
 - `simulation.decision.true_allow_probability`: `0.80`
 - `simulation.decision.camera_confidence_threshold`: `0.70`

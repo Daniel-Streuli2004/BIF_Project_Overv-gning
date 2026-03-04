@@ -60,14 +60,21 @@ class SimulationConfig:
     seed: int | None = None
     total_people: int = 50
     tick_interval_s: float = 1.0
+    command_timeout_s: float = 5.0
+    command_retry_interval_s: float = 2.0
+    occupancy_publish_interval_s: float = 2.0
+    heartbeat_interval_s: float = 10.0
     entry_proximity_m: float = 8.0
     exit_reached_m: float = 8.0
+    gate_crossing_tolerance_m: float = 1.5
     true_allow_probability: float = 0.80
     camera_confidence_threshold: float = 0.70
     false_positive_rate: float = 0.05
     false_negative_rate: float = 0.10
     center_lat: float = 55.6479
     center_lon: float = 12.0417
+    min_speed_kmh: float = 5.0
+    max_speed_kmh: float = 6.0
     locations: tuple[SimulationLocationConfig, ...] = ()
 
 
@@ -323,6 +330,16 @@ def _parse_simulation_config(raw: Any) -> SimulationConfig | None:
     timing_raw = raw.get("timing") if isinstance(raw.get("timing"), dict) else {}
     tick_interval_raw = timing_raw.get("tick_interval_s")
     tick_interval_s = float(tick_interval_raw) if tick_interval_raw is not None else 1.0
+    command_timeout_raw = timing_raw.get("command_timeout_s")
+    command_timeout_s = float(command_timeout_raw) if command_timeout_raw is not None else 5.0
+    command_retry_raw = timing_raw.get("command_retry_interval_s")
+    command_retry_interval_s = float(command_retry_raw) if command_retry_raw is not None else 2.0
+    occupancy_publish_raw = timing_raw.get("occupancy_publish_interval_s")
+    occupancy_publish_interval_s = (
+        float(occupancy_publish_raw) if occupancy_publish_raw is not None else 2.0
+    )
+    heartbeat_raw = timing_raw.get("heartbeat_interval_s")
+    heartbeat_interval_s = float(heartbeat_raw) if heartbeat_raw is not None else 10.0
 
     decision_raw = raw.get("decision") if isinstance(raw.get("decision"), dict) else {}
     entry_proximity_raw = decision_raw.get("entry_proximity_m")
@@ -340,10 +357,32 @@ def _parse_simulation_config(raw: Any) -> SimulationConfig | None:
     exit_reached_m = float(exit_reached_raw) if exit_reached_raw is not None else entry_proximity_m
 
     stadium_raw = raw.get("stadium") if isinstance(raw.get("stadium"), dict) else {}
+    gate_tolerance_raw = stadium_raw.get("gate_crossing_tolerance_m")
+    gate_crossing_tolerance_m = float(gate_tolerance_raw) if gate_tolerance_raw is not None else 1.5
     center_lat_raw = stadium_raw.get("center_lat")
     center_lon_raw = stadium_raw.get("center_lon")
     center_lat = float(center_lat_raw) if center_lat_raw is not None else 55.6479
     center_lon = float(center_lon_raw) if center_lon_raw is not None else 12.0417
+
+    motion_raw = raw.get("motion") if isinstance(raw.get("motion"), dict) else {}
+    min_speed_kmh_raw = motion_raw.get("min_speed_kmh")
+    max_speed_kmh_raw = motion_raw.get("max_speed_kmh")
+    min_speed_mps_raw = motion_raw.get("min_speed_mps")
+    max_speed_mps_raw = motion_raw.get("max_speed_mps")
+
+    if min_speed_kmh_raw is not None:
+        min_speed_kmh = float(min_speed_kmh_raw)
+    elif min_speed_mps_raw is not None:
+        min_speed_kmh = float(min_speed_mps_raw) * 3.6
+    else:
+        min_speed_kmh = 5.0
+
+    if max_speed_kmh_raw is not None:
+        max_speed_kmh = float(max_speed_kmh_raw)
+    elif max_speed_mps_raw is not None:
+        max_speed_kmh = float(max_speed_mps_raw) * 3.6
+    else:
+        max_speed_kmh = 6.0
 
     locations_raw = raw.get("locations") or []
     if not isinstance(locations_raw, list):
@@ -376,14 +415,21 @@ def _parse_simulation_config(raw: Any) -> SimulationConfig | None:
         seed=seed,
         total_people=total_people,
         tick_interval_s=tick_interval_s,
+        command_timeout_s=command_timeout_s,
+        command_retry_interval_s=command_retry_interval_s,
+        occupancy_publish_interval_s=occupancy_publish_interval_s,
+        heartbeat_interval_s=heartbeat_interval_s,
         entry_proximity_m=entry_proximity_m,
         exit_reached_m=exit_reached_m,
+        gate_crossing_tolerance_m=gate_crossing_tolerance_m,
         true_allow_probability=true_allow_probability,
         camera_confidence_threshold=camera_confidence_threshold,
         false_positive_rate=false_positive_rate,
         false_negative_rate=false_negative_rate,
         center_lat=center_lat,
         center_lon=center_lon,
+        min_speed_kmh=min_speed_kmh,
+        max_speed_kmh=max_speed_kmh,
         locations=tuple(locations),
     )
 

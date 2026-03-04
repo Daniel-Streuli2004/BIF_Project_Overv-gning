@@ -92,8 +92,8 @@ Phase 2 expects these sections in `config.yaml`:
 - `simulation.stadium.entry_gate_lines`
 - `simulation.stadium.gate_crossing_tolerance_m`
 - `simulation.stadium.exit_waypoints`
-- `simulation.motion.min_speed_mps`
-- `simulation.motion.max_speed_mps`
+- `simulation.motion.min_speed_kmh`
+- `simulation.motion.max_speed_kmh`
 - `simulation.motion.step_noise_m`
 - `simulation.routing.tie_break_rule`
 - `simulation.routing.retarget_interval_s`

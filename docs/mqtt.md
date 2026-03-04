@@ -24,7 +24,7 @@ The notebook now:
     - `lon`
     - `state`
     - `color`
-    - `speed_mps`
+    - `speed_kmh`
     - `target_entry_id`
 
 - `simulated-city/stadium/entry/event`
