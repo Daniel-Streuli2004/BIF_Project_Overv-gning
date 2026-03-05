@@ -554,6 +554,37 @@ Example:
 m.to_html("map.html", title="Copenhagen City Hall")
 ```
 
+## VS Code widget troubleshooting
+
+If you see this output in a notebook cell:
+
+```text
+Could not render content for 'application/vnd.jupyter.widget-view+json'
+```
+
+the frontend did not render the `Map` widget MIME bundle. Use this workflow:
+
+- Keep the `Map(...)` call as-is (it still creates the map state).
+- Export a fallback HTML file with `to_html(...)`.
+- Display an `<iframe>` pointing to that HTML file.
+- Save the HTML file in the same folder as the notebook (or use a matching relative path), so the iframe source resolves correctly.
+
+Minimal pattern:
+
+```python
+from pathlib import Path
+from IPython.display import HTML, display
+
+m = Map(center=(12.0417, 55.6479), zoom=16.5, height="650px", width="100%")
+m.add_basemap("OpenStreetMap.Mapnik")
+
+map_file = Path("dashboard_map.html")  # same folder as notebook
+m.to_html(str(map_file), title="Dashboard")
+
+display(m)  # works when widget rendering is available
+display(HTML('<iframe src="dashboard_map.html" width="100%" height="680"></iframe>'))
+```
+
 
 ## Workshop extension: live marker movement
 
